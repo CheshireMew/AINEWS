@@ -1,0 +1,39 @@
+
+--- Checking Database: ainews.db ---
+  Table 'news': 142 rows
+    Sample titles: ['“Unification 提案提交前押注 $UNI 的巨鲸”继续增持 1268万美元 UNI', 'H200向中国市场销售的计划基本确认', 'BTC 跌破 87,000 美元，24 小时跌幅 1.33 %']
+  Table 'sqlite_sequence': 3 rows
+  Table 'tags': 8 rows
+  Table 'news_tags': 0 rows
+  Table 'processing_logs': 0 rows
+  Table 'push_logs': 0 rows
+  Table 'filter_stats': 0 rows
+  Table 'deduplicated_news': 102 rows
+    Sample titles: ['现货黄金短线回落12美元，现报4484.29美元/盎司', '贝莱德：美联储2026年降息幅度或有限', 'Metaplanet董事会批准扩大比特币购买计划']
+  Table 'keyword_blacklist': 0 rows
+
+--- Checking Database: ainews_verify.db ---
+  Table 'news': 10 rows
+    Sample titles: ['美股将提前于北京时间25日02:00收市，明日休市一日', '香港财库局与证监会就规管虚拟资产交易及托管服务的立法建议发表咨询总结', 'Arthur Hayes 再向币安转入价值 200 万美元以太坊']
+  Table 'sqlite_sequence': 2 rows
+  Table 'tags': 8 rows
+  Table 'news_tags': 0 rows
+  Table 'processing_logs': 0 rows
+  Table 'push_logs': 0 rows
+  Table 'filter_stats': 0 rows
+
+--- Checking Database: ainews_verify_new.db ---
+  Table 'news': 24 rows
+    Sample titles: ['美股将提前于北京时间25日02:00收市，明日休市一日', '香港财库局与证监会就规管虚拟资产交易及托管服务的立法建议发表咨询总结', 'Arthur Hayes 再向币安转入价值 200 万美元以太坊']
+  Table 'sqlite_sequence': 2 rows
+  Table 'tags': 8 rows
+  Table 'news_tags': 0 rows
+  Table 'processing_logs': 0 rows
+  Table 'push_logs': 0 rows
+  Table 'filter_stats': 0 rows
+
+--- Checking Database: crawler\ainews.db ---
+  [Empty] No tables found.
+
+--- Checking Database: crawler\crypto_news.db ---
+  [Empty] No tables found.

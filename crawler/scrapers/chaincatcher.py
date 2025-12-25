@@ -1,0 +1,184 @@
+"""ChainCatcher爬虫 - 使用样式判断"""
+from .base import BaseScraper
+from typing import List, Dict
+from datetime import datetime
+
+class ChainCatcherScraper(BaseScraper):
+    def __init__(self):
+        super().__init__(
+            site_name='chaincatcher',
+            base_url='https://www.chaincatcher.com/news'
+        )
+    
+    async def scrape_important_news(self) -> List[Dict]:
+        """抓取ChainCatcher的重要新闻"""
+        await self.page.goto(self.base_url)
+        await self.page.wait_for_timeout(3000)
+        
+        # 1. 点击"只看精选"开关
+        try:
+            # 查找 label "只看精选" 并点击其关联的 input 或直接点击 label
+            # 用户提供的HTML: <label ...>只看精选</label>
+            filter_label = await self.page.query_selector('label:text("只看精选")')
+            if filter_label:
+                # 检查 input 状态
+                # input ID 通常在 label 的 for 属性中，或者在 label 旁边
+                input_id = await filter_label.get_attribute('for')
+                if input_id:
+                    input_el = await self.page.query_selector(f'#{input_id}')
+                    if input_el:
+                        is_checked = await input_el.get_attribute('aria-checked')
+                        if is_checked != 'true':
+                            # 点击 label 或 input wrapper
+                            await self.page.evaluate("el => el.click()", filter_label)
+                            await self.page.wait_for_timeout(2000)
+                            print("[DEBUG] 已点击'只看精选'筛选")
+            else:
+                 # 备用方案：直接找 text
+                 element = await self.page.query_selector('text=只看精选')
+                 if element:
+                     await self.page.evaluate("el => el.click()", element)
+                     await self.page.wait_for_timeout(2000)
+                     
+        except Exception as e:
+            print(f"点击筛选按钮失败: {e}")
+        
+        news_list = []
+        
+        # 2. 获取所有新闻项
+        # 遍历所有可能的文章容器，查找包含 selectedClass 的
+        # 通常文章列表是一个个 item
+        items = await self.page.query_selector_all('.article-item, .news-item, .item') 
+        if not items:
+             # 如果没有特定的 class，尝试更通用的选择器
+             items = await self.page.query_selector_all('div[class*="item"], div[class*="list"]')
+             
+        # 如果还是找不到，尝试直接找带有 selectedClass 的元素，然后向上找容器
+        if not items:
+            important_spans = await self.page.query_selector_all('.selectedClass')
+            # 这里的逻辑稍微不同：我们直接从重要标记反推
+            items = []
+            for span in important_spans:
+                # 向上找容器
+                container = await span.evaluate_handle('el => el.closest("div[class*=\'item\']") || el.closest("a") || el.parentElement')
+                if container:
+                    items.append(container)
+
+        print(f"[DEBUG] 找到 {len(items)} 个潜在新闻条目")
+        
+        processed_urls = set()
+        
+        for item in items:
+            try:
+                # 3. 检查是否有重要标记 (class="text selectedClass")
+                # 这是一个 span，内容是标题
+                title_el = await item.query_selector('.selectedClass')
+                
+                # 如果开启了"只看精选"，理论上列表里的都是精选，但我们需要确认
+                # 如果没有 title_el (即没有红色高亮/精选标记)，可能不是重要新闻
+                if not title_el:
+                     # 再次检查：也许 item 本身就是那个 link
+                     is_selected = await item.evaluate('el => el.classList.contains("selectedClass") || el.querySelector(".selectedClass")')
+                     if not is_selected:
+                         continue
+                     if await item.evaluate('el => el.classList.contains("selectedClass")'):
+                         title_el = item
+                
+                # 提取标题
+                title = await self.safe_extract_text(title_el)
+                if not title:
+                    # 尝试从 item 中找其他标题元素
+                    title = await self.safe_extract_text(item)
+                    
+                if not title or len(title) < 5:
+                    continue
+                    
+                # 4. 提取链接
+                # 链接可能在 item 本身 (是 a 标签) 或者在其内部
+                link_el = item
+                tag_name = await item.evaluate('el => el.tagName')
+                if tag_name != 'A':
+                    link_el = await item.query_selector('a')
+                
+                if not link_el:
+                    # 尝试从 title_el 向上找 a 标签
+                    link_el = await title_el.evaluate_handle('el => el.closest("a")')
+                    
+                if not link_el:
+                    continue
+                    
+                url = await self.safe_get_attribute(link_el, 'href')
+                if not url:
+                    continue
+                    
+                if not url.startswith('http'):
+                    url = f"https://www.chaincatcher.com{url}"
+                
+                if url in processed_urls:
+                    continue
+                processed_urls.add(url)
+                
+                # 5. 提取时间
+                # ChainCatcher 时间通常在列表项底部
+                time_text = await item.evaluate('''
+                    el => {
+                        const timeEl = el.querySelector('.time') || el.querySelector('.date') || el.querySelector('span[class*="gray"]');
+                        return timeEl ? timeEl.textContent : '';
+                    }
+                ''')
+                
+                published_at = self.parse_relative_time(time_text) if time_text else datetime.now()
+                
+                # 6. 增量抓取检查
+                if self.should_stop_scraping(title, url, published_at):
+                    break
+                
+                # 7. 数量限制检查
+                if len(news_list) >= self.max_items:
+                    print(f"[数量限制] 已达到最大抓取数量 {self.max_items}，停止抓取")
+                    break
+                
+                # 8. 获取完整内容
+                content = ''
+                if url:
+                    # 使用用户提供的选择器 .rich_text_content
+                    content_selectors = ['.rich_text_content', '.article-content']
+                    content = await self.fetch_full_content(url, content_selectors)
+                
+                # Fallback
+                if not content or len(content) < 10:
+                    content = title
+                
+                news_item = {
+                    'title': title,
+                    'content': content,
+                    'url': url,
+                    'published_at': published_at,
+                    'is_marked_important': True,
+                    'site_importance_flag': 'selected_class'
+                }
+                
+                news_list.append(news_item)
+                print(f"[DEBUG] 添加重要新闻: {title[:20]}...")
+                
+            except Exception as e:
+                print(f"解析ChainCatcher新闻项失败: {e}")
+                continue
+        
+        print(f"ChainCatcher: 抓取到 {len(news_list)} 条重要新闻")
+        return news_list
+
+
+# 测试代码
+if __name__ == '__main__':
+    import asyncio
+    
+    async def test():
+        scraper = ChainCatcherScraper()
+        news = await scraper.run()
+        
+        for item in news[:5]:
+            print(f"\n标题: {item['title']}")
+            print(f"标识: {item['site_importance_flag']}")
+    
+    asyncio.run(test())

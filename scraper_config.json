@@ -1,0 +1,30 @@
+{
+  "odaily": {
+    "limit": 20,
+    "interval": 30
+  },
+  "blockbeats": {
+    "limit": 20,
+    "interval": 30
+  },
+  "techflow": {
+    "limit": 20,
+    "interval": 30
+  },
+  "foresight": {
+    "limit": 20,
+    "interval": 30
+  },
+  "chaincatcher": {
+    "limit": 20,
+    "interval": 30
+  },
+  "panews": {
+    "limit": 20,
+    "interval": 30
+  },
+  "marsbit": {
+    "limit": 20,
+    "interval": 30
+  }
+}

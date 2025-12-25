@@ -1,0 +1,9 @@
+playwright>=1.41.0
+beautifulsoup4>=4.12.0
+pyyaml>=6.0
+psycopg2-binary>=2.9.9
+python-telegram-bot>=20.7
+apscheduler>=3.10.4
+openai>=1.10.0
+python-dotenv>=1.0.0
+requests>=2.31.0

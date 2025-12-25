@@ -1,0 +1,10 @@
+--------------------------------------------------
+Compare T1 vs T2:
+  T1: Vitalik Buterin 预测 2030 年代将出现无 bug 代码
+  T2: Vitalik预测：2030年代无Bug代码将成为可能
+  KWs 1: {'Buterin', '2030', '年代', '出现', '代码', '预测', 'Vitalik', 'bug'}
+  KWs 2: {'2030', '年代', '代码', '预测', '可能', 'Vitalik', '成为', 'Bug'}
+  Nums 1: {'2030'}
+  Nums 2: {'2030'}
+  Score: 0.9373
+  Result: MATCH
