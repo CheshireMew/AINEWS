@@ -72,5 +72,34 @@ export const exportNews = (params) => {
     });
 };
 
+// AI Filtering APIs
+export const filterCuratedNews = (params) =>
+    api.post('/curated/ai_filter', params);
+
+export const getAiConfig = () => api.get('/ai/config');
+export const setAiConfig = (config) => api.post('/ai/config', config);
+
+export const getFilteredCurated = (status, page = 1, limit = 50) =>
+    api.get('/curated/filtered', { params: { status, page, limit } });
+
+export const restoreCuratedNews = (id) => api.post(`/curated/restore/${id}`);
+export const batchRestoreCurated = () => api.post('/curated/batch_restore');
+export const clearAllAiStatus = () => api.post('/curated/clear_all_ai_status');
+
+// Export News
+export const getExportNews = (hours, minScore) => api.get('/curated/export', {
+    params: { hours, min_score: minScore }
+});
+
+
+
+// Telegram APIs
+export const getTelegramConfig = () => api.get('/telegram/config');
+export const setTelegramConfig = (config) => api.post('/telegram/config', config);
+export const testTelegramPush = () => api.post('/telegram/test');
+
+export const getDeepSeekConfig = () => api.get('/deepseek/config');
+export const setDeepSeekConfig = (config) => api.post('/deepseek/config', config);
+export const testDeepSeekConnection = () => api.post('/deepseek/test');
 
 export default api;

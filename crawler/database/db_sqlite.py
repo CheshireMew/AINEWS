@@ -1042,6 +1042,37 @@ class Database:
             print(f"Get Filtered Dedup News Error: {e}")
             return {'data': [], 'total': 0, 'page': page, 'limit': limit}
 
+    def get_filtered_curated_news(self, status: str, page: int = 1, limit: int = 50):
+        """获取AI筛选后的精选数据 (approved, rejected, or restored)"""
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            offset = (page - 1) * limit
+            
+            where_clause = "ai_status = ?"
+            params = [status]
+            
+            # 特殊处理: 如果查询 'approved'，也包含 'restored'
+            if status == 'approved':
+                where_clause = "(ai_status = 'approved' OR ai_status = 'restored')"
+                params = []
+            
+            query = f"SELECT * FROM curated_news WHERE {where_clause} ORDER BY curated_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            count_query = f"SELECT COUNT(*) FROM curated_news WHERE {where_clause}"
+            cursor.execute(count_query, params[:-2])
+            total = cursor.fetchone()[0]
+            
+            conn.close()
+            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
+        except Exception as e:
+            print(f"Get Filtered Curated Error: {e}")
+            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
+
     # --- System Config Methods ---
     def get_config(self, key: str) -> Optional[str]:
         """获取系统配置"""

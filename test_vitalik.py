@@ -17,7 +17,7 @@ def test_vitalik():
         "Vitalik预测：2030年代无Bug代码将成为可能"
     ]
     
-    dedup = LocalDeduplicator(similarity_threshold=0.55)
+    dedup = LocalDeduplicator(similarity_threshold=0.50)
     
     # Save output to file
     with open('score_vitalik.txt', 'w', encoding='utf-8') as f:

@@ -127,13 +127,23 @@ class ForesightScraper(BaseScraper):
                 # 获取完整内容
                 content = ''
                 if url:
-                    # Foresight News的内容选择器
-                    content_selectors = [
-                        '.detail-body',  # Foresight详情内容（正确选择器）
-                        '.article-content',
-                        '.content-body',
-                    ]
-                    content = await self.fetch_full_content(url, content_selectors)
+                    try:
+                        # 直接打开详情页
+                        detail_page = await self.context.new_page()
+                        await detail_page.goto(url, wait_until='domcontentloaded')
+                        await detail_page.wait_for_timeout(2000)
+                        
+                        # 使用inner_text()获取纯文本
+                        content_el = await detail_page.query_selector('.detail-body')
+                        if content_el:
+                            content = await content_el.inner_text()
+                        
+                        # 清理内容
+                        content = self.clean_content(content, title)
+                        
+                        await detail_page.close()
+                    except Exception as e:
+                        print(f"  获取详细内容失败: {e}")
                 
                 # 如果没获取到内容，使用标题作为fallback
                 if not content or len(content) < 10:

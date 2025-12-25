@@ -95,6 +95,48 @@ class BaseScraper(ABC):
         except:
             return ""
     
+    def clean_content(self, content: str, title: str = "") -> str:
+        """
+        清理新闻内容，去除固定前缀和重复标题
+        
+        Args:
+            content: 原始内容
+            title: 新闻标题（用于去除内容中的重复标题）
+        
+        Returns:
+            清理后的内容
+        """
+        import re
+        
+        if not content:
+            return content
+        
+        # 1. 去除 marsbit 的【标题】格式
+        content = re.sub(r'^【[^】]+】', '', content).strip()
+        
+        # 2. 去除各网站的固定前缀
+        prefixes = [
+            r'Odaily星球日报讯\s*',
+            r'PANews\s+\d+月\d+日消息[，,]\s*',
+            r'ChainCatcher\s*消息[，,]\s*',
+            r'BlockBeats\s*消息[，,]\s*',
+            r'深潮\s*TechFlow\s*消息[，,]\s*',
+            r'Foresight\s*News\s*消息[，,]\s*',
+            r'火星财经消息[，,]\s*',
+            r'MarsBit\s*消息[，,]\s*',
+        ]
+        
+        for prefix_pattern in prefixes:
+            content = re.sub(prefix_pattern, '', content, flags=re.IGNORECASE)
+        
+        # 3. 如果提供了标题，且内容开头包含标题，则去除
+        if title and content.startswith(title):
+            content = content[len(title):].strip()
+            # 去除可能跟随的标点符号
+            content = re.sub(r'^[，,：:、\s]+', '', content)
+        
+        return content.strip()
+    
     def parse_relative_time(self, time_str: str) -> Optional[datetime]:
         """
         解析相对时间（如"2小时前"）为datetime对象

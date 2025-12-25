@@ -100,6 +100,9 @@ class MarsBitScraper(BaseScraper):
                 if not content or len(content) < 10:
                     content = title
                 
+                # 清理内容
+                content = self.clean_content(content, title)
+                
                 news_item = {
                     'title': title,
                     'content': content,

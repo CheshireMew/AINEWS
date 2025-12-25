@@ -1,7 +1,7 @@
 import sys
 import asyncio
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -22,6 +22,11 @@ logger = getLogger("uvicorn")
 sys.path.append(str(Path(__file__).parent.parent / 'crawler'))
 
 from database.db_sqlite import Database
+
+# Add backend directory to path for service imports
+sys.path.append(str(Path(__file__).parent))
+from services.llm import DeepSeekService
+
 # Import Scrapers
 from scrapers.techflow import TechFlowScraper
 from scrapers.odaily import OdailyScraper
@@ -265,7 +270,7 @@ async def deduplicate_news(req: DeduplicateRequest):
             }
         
         # 2. 使用LocalDeduplicator找出重复
-        dedup = LocalDeduplicator(similarity_threshold=0.65, time_window_hours=req.time_window_hours)
+        dedup = LocalDeduplicator(similarity_threshold=0.50, time_window_hours=req.time_window_hours)
         news_list = dedup.mark_duplicates(news_list)
         
         # 3. 统计和处理重复项
@@ -545,6 +550,324 @@ def restore_news_api(news_id: int, req: RestoreRequest):
     else:
         raise HTTPException(status_code=400, detail="还原失败")
 
+# AI Filtering Endpoints
+
+class AIFilterRequest(BaseModel):
+    hours: int = 8
+    filter_prompt: str
+
+class AIConfig(BaseModel):
+    prompt: Optional[str] = None
+    hours: Optional[int] = 8
+
+@app.get("/api/ai/config")
+def get_ai_config():
+    """获取AI配置"""
+    db = Database()
+    prompt = db.get_config("ai_filter_prompt") or ""
+    hours = db.get_config("ai_filter_hours")
+    return {"prompt": prompt, "hours": int(hours) if hours else 8}
+
+@app.post("/api/ai/config")
+def set_ai_config(config: AIConfig):
+    """设置AI配置"""
+    db = Database()
+    if config.prompt is not None:
+        db.set_config("ai_filter_prompt", config.prompt)
+    if config.hours is not None:
+        db.set_config("ai_filter_hours", str(config.hours))
+    return {"status": "success", "message": "配置已保存"}
+
+
+@app.post("/api/curated/ai_filter")
+async def ai_filter_curated(req: AIFilterRequest):
+    """执行AI筛选:筛选精选数据中的新闻标题"""
+    db = Database()
+    
+    # 加载AI配置 (这里简化处理,实际应该从配置表读取)
+    # 暂时硬编码,后续可以改进
+    api_key = db.get_config("llm_api_key")
+    base_url = db.get_config("llm_base_url") or "https://api.deepseek.com"
+    model = db.get_config("llm_model") or "deepseek-chat"
+    
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先配置 DeepSeek API Key")
+    
+    # 获取指定时间范围内未处理或通过的精选数据
+    # 支持分页处理以优化速度
+    from datetime import datetime, timedelta
+    cutoff_time = (datetime.now() - timedelta(hours=req.hours)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    conn = db.connect()
+    cursor = conn.cursor()
+    
+    # 首先获取总数 - 只处理未筛选的数据(pending或NULL)
+    cursor.execute(
+        "SELECT COUNT(*) FROM curated_news WHERE curated_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')",
+        (cutoff_time,)
+    )
+    total_count = cursor.fetchone()[0]
+    
+    if total_count == 0:
+        conn.close()
+        return {"status": "success", "message": "没有待筛选的数据", "processed": 0, "total": 0}
+    
+    # 获取当前批次的数据（默认每批 20 条，避免 JSON 过长被截断）
+    batch_size = getattr(req, 'batch_size', 20)
+    offset = getattr(req, 'offset', 0)
+    
+    cursor.execute(
+        "SELECT id, title FROM curated_news WHERE curated_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') LIMIT ? OFFSET ?",
+        (cutoff_time, batch_size, offset)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return {"status": "success", "message": "当前批次没有数据", "processed": 0, "total": total_count, "offset": offset}
+    
+    news_items = [{"id": row["id"], "title": row["title"]} for row in rows]
+    
+    # 调用AI筛选
+    service = DeepSeekService(api_key, base_url, model)
+    try:
+        results = await service.filter_titles(news_items, req.filter_prompt)
+        # results example: [{"id": 1, "score": 8, "reason": "Good", "tag": "AI"}, ...]
+        
+        # Build map - 将 id 转换为整数以匹配数据库类型
+        result_map = {}
+        for item in results:
+            try:
+                item_id = int(item['id'])  # 转换字符串 ID 为整数
+                result_map[item_id] = item
+            except (ValueError, KeyError) as e:
+                print(f"[WARNING] Skipping invalid result item: {item}, error: {e}")
+        
+        print(f"[DEBUG] Built result_map with {len(result_map)} items")
+        
+        # 更新数据库
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        updated_count = 0
+        filtered_count = 0
+        
+        for news_item in news_items:
+            news_id = news_item['id']
+            # Default to rejected if AI didn't return it (safety fallback), or use AI result
+            resolution = result_map.get(news_id)
+            
+            new_status = 'rejected'
+            reason = "AI未返回结果"
+            
+            if resolution:
+                # 评分制：获取分数、理由和标签
+                score = resolution.get('score', 0)
+                raw_reason = resolution.get('reason', '')
+                tag = resolution.get('tag', '')
+                
+                # 阈值判断：>=6分为approved，<6分为rejected
+                if score >= 6:
+                    new_status = 'approved'
+                else:
+                    new_status = 'rejected'
+                
+                # 组合显示格式：分数-理由 #标签
+                if tag:
+                    reason = f"{score}分-{raw_reason} #{tag}"
+                elif raw_reason:
+                    reason = f"{score}分-{raw_reason}"
+                else:
+                    reason = f"{score}分"
+            
+            cursor.execute(
+                "UPDATE curated_news SET ai_status = ?, ai_explanation = ? WHERE id = ?",
+                (new_status, reason, news_id)
+            )
+            if cursor.rowcount > 0:
+                updated_count += 1
+                if new_status == 'rejected':
+                    filtered_count += 1
+            
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "success", 
+            "message": f"筛选完成: 处理 {updated_count} 条, 拒绝 {filtered_count} 条",
+            "processed": updated_count,
+            "filtered": filtered_count,
+            "total": total_count,
+            "offset": offset,
+            "has_more": (offset + batch_size) < total_count
+        }
+
+        
+    except Exception as e:
+        logger.error(f"AI筛选失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI筛选失败: {str(e)}")
+
+
+@app.post("/api/curated/batch_restore")
+async def batch_restore_rejected():
+    """批量还原所有被拒绝的数据"""
+    db = Database()
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 查询被拒绝的数据数量
+        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status = 'rejected'")
+        rejected_count = cursor.fetchone()[0]
+        
+        if rejected_count > 0:
+            # 将所有 rejected 状态改为 pending，并清空 ai_explanation
+            cursor.execute("""
+                UPDATE curated_news 
+                SET ai_status = 'pending', ai_explanation = NULL 
+                WHERE ai_status = 'rejected'
+            """)
+            conn.commit()
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": f"成功还原 {rejected_count} 条数据",
+            "restored_count": rejected_count
+        }
+    except Exception as e:
+        logger.error(f"批量还原失败: {e}")
+        raise HTTPException(status_code=500, detail=f"批量还原失败: {str(e)}")
+
+
+@app.post("/api/curated/clear_all_ai_status")
+async def clear_all_ai_status():
+    """清空所有 AI 筛选状态"""
+    db = Database()
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 查询所有有 AI 状态的数据
+        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status IS NOT NULL AND ai_status != ''")
+        total_count = cursor.fetchone()[0]
+        
+        if total_count > 0:
+            # 清空所有 AI 相关字段
+            cursor.execute("""
+                UPDATE curated_news 
+                SET ai_status = NULL, ai_explanation = NULL 
+                WHERE ai_status IS NOT NULL AND ai_status != ''
+            """)
+            conn.commit()
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": f"成功清空 {total_count} 条数据的 AI 筛选状态",
+            "cleared_count": total_count
+        }
+    except Exception as e:
+        logger.error(f"清空失败: {e}")
+        raise HTTPException(status_code=500, detail=f"清空失败: {str(e)}")
+
+
+@app.get("/api/curated/export")
+async def get_export_news(hours: int = 24, min_score: int = 6):
+    """获取可导出的新闻列表（所有被AI评分的数据）"""
+    db = Database()
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 计算时间范围 - 数据库存储的是UTC时间，所以使用utcnow()
+        from datetime import timezone
+        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time_str = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        logger.info(f"查询时间范围: >= {cutoff_time_str} (UTC)")
+        
+        # 查询所有被AI评分的数据（approved + rejected）
+        cursor.execute("""
+            SELECT id, title, content, source_url, source_site, ai_status, ai_explanation, curated_at
+            FROM curated_news 
+            WHERE curated_at >= ? 
+            AND ai_status IN ('approved', 'rejected')
+            AND ai_explanation IS NOT NULL
+        """, (cutoff_time_str,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # 解析评分并过滤
+        filtered_news = []
+        for row in rows:
+            news_item = {
+                'id': row['id'],
+                'title': row['title'],
+                'content': row['content'],
+                'source_url': row['source_url'],
+                'source_site': row['source_site'],
+                'ai_status': row['ai_status'],
+                'ai_explanation': row['ai_explanation'],
+                'curated_at': row['curated_at']
+            }
+            
+            # 提取评分
+            explanation = row['ai_explanation'] or ""
+            score = 0
+            if explanation and '分' in explanation:
+                try:
+                    score = int(explanation.split('分')[0])
+                except:
+                    score = 0
+            
+            news_item['score'] = score
+            
+            # 过滤：评分>=min_score
+            if score >= min_score:
+                filtered_news.append(news_item)
+        
+        # 按评分从高到低排序
+        filtered_news.sort(key=lambda x: x['score'], reverse=True)
+        
+        return {
+            "status": "success",
+            "news": filtered_news,
+            "total": len(filtered_news)
+        }
+        
+    except Exception as e:
+        logger.error(f"获取导出新闻失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取导出新闻失败: {str(e)}")
+
+
+@app.post("/api/curated/restore/{news_id}")
+def restore_curated_news_api(news_id: int):
+    """还原被AI拒绝的新闻"""
+    db = Database()
+    conn = db.connect()
+    cursor = conn.cursor()
+    # 将状态设置为 'restored' (或者 'approved' ? 用户想要不被再筛选，所以 'restored' 更安全)
+    # 但前端 'AI 精选' 列表可能只查 'approved'。我们需要修改 get_filtered_curated_news
+    # 或者我们设为 'approved' 并加个额外字段？
+    # 简单点：设为 'restored'，然后修改查询逻辑让它出现在精选列表里。
+    cursor.execute("UPDATE curated_news SET ai_status = 'restored' WHERE id = ?", (news_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "已还原"}
+
+
+@app.get("/api/curated/filtered")
+def get_filtered_curated(status: str, page: int = 1, limit: int = 50):
+    """获取筛选后的精选数据 (approved 或 rejected)"""
+    db = Database()
+    if status not in ['approved', 'rejected']:
+        raise HTTPException(status_code=400, detail="status 必须是 'approved' 或 'rejected'")
+    return db.get_filtered_curated_news(status, page, limit)
+
 @app.get("/api/filtered/dedup/news")
 def get_filtered_dedup_news_api(page: int = 1, limit: int = 50):
     """获取去重库中的已过滤数据"""
@@ -601,6 +924,108 @@ def login(req: LoginRequest):
     if req.password == "admin123": # Default password
         return {"token": "valid-session", "message": "Login successful"}
     raise HTTPException(status_code=401, detail="Invalid password")
+
+# --- Telegram Endpoints ---
+class TelegramConfig(BaseModel):
+    bot_token: str
+    chat_id: str
+    enabled: bool = False
+
+@app.get("/api/telegram/config")
+def get_telegram_config_api():
+    """Get Telegram configuration"""
+    db = Database()
+    return {
+        "bot_token": db.get_config("telegram_bot_token") or "",
+        "chat_id": db.get_config("telegram_chat_id") or "",
+        "enabled": db.get_config("telegram_enabled") == "true"
+    }
+
+@app.post("/api/telegram/config")
+def set_telegram_config_api(config: TelegramConfig):
+    """Set Telegram configuration"""
+    db = Database()
+    db.set_config("telegram_bot_token", config.bot_token)
+    db.set_config("telegram_chat_id", config.chat_id)
+    db.set_config("telegram_enabled", "true" if config.enabled else "false")
+    return {"status": "success"}
+
+@app.post("/api/telegram/test")
+async def test_telegram_push():
+    """Test Telegram Push"""
+    db = Database()
+    token = db.get_config("telegram_bot_token")
+    chat_id = db.get_config("telegram_chat_id")
+    
+    if not token or not chat_id:
+        raise HTTPException(status_code=400, detail="请先配置 Telegram Bot Token 和 Chat ID")
+        
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "🔔 <b>AINews Filter</b>\n这是一条测试消息\nThis is a test message.",
+                    "parse_mode": "HTML"
+                },
+                timeout=10.0
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                raise Exception(data.get("description", "Unknown error"))
+    except Exception as e:
+         raise HTTPException(status_code=400, detail=f"发送失败: {str(e)}")
+            
+    return {"status": "success"}
+
+
+
+# --- DeepSeek Endpoints ---
+class DeepSeekConfig(BaseModel):
+    api_key: str
+    base_url: str = "https://api.deepseek.com"
+    model: str = "deepseek-chat"
+
+@app.get("/api/deepseek/config")
+def get_deepseek_config_api():
+    """Get DeepSeek configuration"""
+    db = Database()
+    return {
+        "api_key": db.get_config("llm_api_key") or "",
+        "base_url": db.get_config("llm_base_url") or "https://api.deepseek.com",
+        "model": db.get_config("llm_model") or "deepseek-chat"
+    }
+
+@app.post("/api/deepseek/config")
+def set_deepseek_config_api(config: DeepSeekConfig):
+    """Set DeepSeek configuration"""
+    db = Database()
+    db.set_config("llm_api_key", config.api_key)
+    db.set_config("llm_base_url", config.base_url)
+    db.set_config("llm_model", config.model)
+    return {"status": "success"}
+
+@app.post("/api/deepseek/test")
+async def test_deepseek_connection_api():
+    """Test DeepSeek/LLM Connection"""
+    db = Database()
+    api_key = db.get_config("llm_api_key")
+    base_url = db.get_config("llm_base_url") or "https://api.deepseek.com"
+    model = db.get_config("llm_model") or "deepseek-chat"
+    
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先配置 API Key")
+        
+    try:
+        service = DeepSeekService(api_key, base_url, model)
+        result = await service.test_connection()
+        if not result["ok"]:
+             raise HTTPException(status_code=400, detail=f"连接失败: {result.get('error')}")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/export")
 def export_news(

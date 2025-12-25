@@ -135,12 +135,31 @@ class PANewsScraper(BaseScraper):
                 # 8. 获取完整内容
                 content = ''
                 if url:
-                    content_selectors = ['article.prose', '.article-content', 'article']
-                    content = await self.fetch_full_content(url, content_selectors)
-                
+                    try:
+                        detail_page = await self.browser.new_page()
+                        await detail_page.goto(url, timeout=15000)
+                        await detail_page.wait_for_timeout(1500)
+                        
+                        # 尝试多个选择器
+                        for selector in ['article.prose', '.article-content', 'article']:
+                            content_el = await detail_page.query_selector(selector)
+                            if content_el:
+                                # 确保使用 inner_text() 而不是 innerHTML
+                                content = await content_el.inner_text()
+                                content = content.strip()
+                                if content and len(content) > 50:
+                                    break
+                        
+                        await detail_page.close()
+                    except Exception as e:
+                        print(f"  获取详情页失败: {e}")
+               
                 # Fallback
                 if not content or len(content) < 10:
                     content = title
+                
+                # 清理内容
+                content = self.clean_content(content, title)
                 
                 news_item = {
                     'title': title,

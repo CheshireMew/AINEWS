@@ -24,4 +24,4 @@ length:
 
 deduplication:
   time_window_hours: 24
-  similarity_threshold: 0.55
+  similarity_threshold: 0.50

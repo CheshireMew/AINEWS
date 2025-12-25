@@ -18,7 +18,7 @@ def test_metaplanet():
         "Metaplanet董事会批准扩大比特币购买计划"
     ]
     
-    dedup = LocalDeduplicator(similarity_threshold=0.55)
+    dedup = LocalDeduplicator(similarity_threshold=0.50)
     
     # Save output to file
     with open('score_metaplanet.txt', 'w', encoding='utf-8') as f:

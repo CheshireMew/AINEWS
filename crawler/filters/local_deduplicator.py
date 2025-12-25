@@ -28,10 +28,10 @@ class LocalDeduplicator:
     3. 在时间窗口内查找重复
     """
     
-    def __init__(self, similarity_threshold: float = 0.55, time_window_hours: int = 24):
+    def __init__(self, similarity_threshold: float = 0.50, time_window_hours: int = 24):
         """
         Args:
-            similarity_threshold: 相似度阈值 (0-1)，超过此值认为是重复（默认0.55）
+            similarity_threshold: 相似度阈值 (0-1)，超过此值认为是重复（默认0.50）
             time_window_hours: 时间窗口（小时），只在此窗口内比较
         """
         self.similarity_threshold = similarity_threshold
