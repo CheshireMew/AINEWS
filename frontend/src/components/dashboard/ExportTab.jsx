@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Card, Button, Select, Space, Table, Tag, message } from 'antd';
+import PropTypes from 'prop-types';
+import { Card, Select, Button, Space, message, DatePicker } from 'antd';
 import { getExportNews } from '../../api';
 
 const { Option } = Select;
@@ -8,7 +9,7 @@ const { Option } = Select;
  * 新闻输出Tab组件
  * 用于加载、筛选和导出AI评分的新闻
  */
-const ExportTab = () => {
+const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
     // 筛选条件状态
     const [exportTimeRange, setExportTimeRange] = useState(24); // 24小时
     const [exportMinScore, setExportMinScore] = useState(6); // 最低6分
@@ -17,7 +18,6 @@ const ExportTab = () => {
     const [exportNews, setExportNews] = useState([]);
     const [newsExportLoading, setNewsExportLoading] = useState(false);
     const [selectedNewsIds, setSelectedNewsIds] = useState([]);
-    const [manuallyFeatured, setManuallyFeatured] = useState([]); // 手动加精的新闻列表
 
     /**
      * 加载新闻
@@ -226,6 +226,10 @@ const ExportTab = () => {
             />
         </div>
     );
+};
+
+ExportTab.propTypes = {
+    manuallyFeatured: PropTypes.arrayOf(PropTypes.object)
 };
 
 export default ExportTab;

@@ -583,16 +583,22 @@ class Database(DatabaseBase):
         except:
             return 0
         
-    def get_deduplicated_news(self, page=1, limit=50, source=None):
+    def get_deduplicated_news(self, page=1, limit=50, source=None, keyword=None):
         """分页查询deduplicated_news表 - 已重构"""
         where = "source_site = ?" if source else "1=1"
-        params = (source,) if source else ()
+        params = [source] if source else []
+        
+        if keyword:
+            where += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
         
         return self.paginated_query(
             table='deduplicated_news',
             fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type',
             where=where,
-            where_params=params,
+            where_params=tuple(params),
             order_by='published_at DESC',
             page=page,
             limit=limit
@@ -761,8 +767,9 @@ class Database(DatabaseBase):
             query_curated = '''
                 SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, original_news_id
                 FROM curated_news
+                WHERE curated_at >= ?
             '''
-            cursor.execute(query_curated)
+            cursor.execute(query_curated, (start_time,))
             curated_rows = cursor.fetchall()
 
             retroactive_filtered_count = 0
@@ -902,18 +909,24 @@ class Database(DatabaseBase):
             print(f"Export query failed: {e}")
             return []
 
-    def get_curated_news(self, page=1, limit=50, source=None):
+    def get_curated_news(self, page=1, limit=50, source=None, keyword=None):
         """分页查询 curated_news 表 (精选数据) - 已重构使用基类"""
         # 构建WHERE条件
         where = "source_site = ?" if source else "1=1"
-        params = (source,) if source else ()
+        params = [source] if source else []
+        
+        if keyword:
+            where += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
         
         # 使用基类的paginated_query方法
         return self.paginated_query(
             table='curated_news',
             fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type',
             where=where,
-            where_params=params,
+            where_params=tuple(params),
             order_by='published_at DESC',
             page=page,
             limit=limit
@@ -1033,32 +1046,51 @@ class Database(DatabaseBase):
             print(f"获取最近URL列表失败: {e}")
             return []
 
-    def get_filtered_dedup_news(self, page=1, limit=50):
+    def get_filtered_dedup_news(self, page=1, limit=50, keyword=None):
         """获取去重库中的已过滤数据 - 已重构"""
         where = "stage = 'filtered'"
+        params = []
+        
+        if keyword:
+            where += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
         
         return self.paginated_query(
             table='deduplicated_news',
             where=where,
-            where_params=(),
+            where_params=tuple(params),
             order_by='published_at DESC',
             page=page,
             limit=limit
         )
         
-    def get_filtered_curated_news(self, ai_status, page=1, limit=50):
+    def get_filtered_curated_news(self, ai_status, page=1, limit=50, source=None, keyword=None):
         """获取AI筛选后的精选数据 - 已重构"""
         where = "ai_status = ?"
-        params = (ai_status,)
+        params = [ai_status]
+
+        if source:
+            where += " AND source_site = ?"
+            params.append(source)
+            
+        if keyword:
+            where += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
         
         return self.paginated_query(
             table='curated_news',
             where=where,
-            where_params=params,
+            where_params=tuple(params),
             order_by='published_at DESC',
             page=page,
             limit=limit
         )
+        
+
     # --- System Config Methods ---
     def get_config(self, key: str) -> Optional[str]:
         """获取系统配置"""

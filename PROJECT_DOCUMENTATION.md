@@ -81,7 +81,19 @@ AINEWS/
 ├── frontend/                   # React前端
 │   ├── src/
 │   │   ├── pages/            # 页面组件
-│   │   │   └── Dashboard.jsx # 主仪表盘 (95KB, 1866行)
+│   │   │   └── Dashboard.jsx # 主仪表盘 (56KB, 1435行)
+│   │   ├── components/       # 可复用组件
+│   │   │   └── dashboard/   # Dashboard子组件
+│   │   │       ├── NewsManagementTab.jsx # 数据管理Tab
+│   │   │       ├── SpiderControlTab.jsx  # 爬虫管理Tab
+│   │   │       ├── ScraperCard.jsx       # 爬虫卡片子组件
+│   │   │       ├── DeduplicatedTab.jsx   # 去重数据Tab
+│   │   │       ├── FilterSettingsTab.jsx # 过滤设置Tab
+│   │   │       ├── CuratedNewsTab.jsx    # 精选数据Tab
+│   │   │       ├── ApiSettingsTab.jsx    # API配置Tab
+│   │   │       ├── ExportTab.jsx         # 新闻输出Tab
+│   │   │       ├── AIFilterTab.jsx       # AI筛选Tab
+│   │   │       └── AIBestTab.jsx         # AI精选Tab
 │   │   ├── api.js            # API封装
 │   │   ├── App.jsx           # 应用入口
 │   │   └── main.jsx          # React入口
@@ -640,4 +652,5 @@ backend/test_api.py  # API测试
 ---
 
 *文档创建于 2025-12-26，基于项目当前状态*  
-*最后更新: 2025-12-26 - 新增"常见修改场景快速指南"章节，增强新闻输出功能（内容展开+完整复制），修复所有爬虫时间解析bug，AI tab添加级联删除功能*
+*最后更新: 2025-12-26 - 前端深度重构与死代码清理（Dashboard拆分为9个独立组件，主文件从1866行减少至约400行）。优化本地过滤逻辑（严格遵循时间范围），修复去重提示bug。*
+

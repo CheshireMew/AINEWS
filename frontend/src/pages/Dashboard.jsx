@@ -1,8 +1,14 @@
 import AIFilterTab from '../components/dashboard/AIFilterTab';
 import AIBestTab from '../components/dashboard/AIBestTab';
+import SpiderControlTab from '../components/dashboard/SpiderControlTab';
+import FilterSettingsTab from '../components/dashboard/FilterSettingsTab';
+import NewsManagementTab from '../components/dashboard/NewsManagementTab';
+import DeduplicatedTab from '../components/dashboard/DeduplicatedTab';
+import CuratedNewsTab from '../components/dashboard/CuratedNewsTab';
+import ApiSettingsTab from '../components/dashboard/ApiSettingsTab';
 import React, { useEffect, useState, useRef } from 'react';
 import {
-    Layout, Menu, Table, Button, Card, Row, Col,
+    Layout, Menu, Button, Card, Row, Col,
     Statistic, Tag, Tabs, message, Select, Space, Input, Popconfirm,
     DatePicker, Modal, Checkbox
 } from 'antd';
@@ -13,151 +19,13 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getStats, getNews, runSpider, getSpiders, getSpiderStatus, deleteNews, cancelScraper, updateConfig, deduplicateNews, getDeduplicatedNews, deleteDeduplicatedNews, getBlacklist, addBlacklist, deleteBlacklist, filterNews, exportNews, getCuratedNews, getCuratedStats, deleteCuratedNews, restoreNews, getFilteredDedupNews, getTelegramConfig, setTelegramConfig, testTelegramPush, filterCuratedNews, getFilteredCurated, getDeepSeekConfig, setDeepSeekConfig, testDeepSeekConnection, restoreCuratedNews, getAiConfig, setAiConfig, batchRestoreCurated, clearAllAiStatus, getExportNews } from '../api';
+import * as api from '../api'; // Add api namespace import for fetchGlobalCounts
 import ExportTab from '../components/dashboard/ExportTab';
 import dayjs from 'dayjs'; // Import dayjs
 
 
 const { Header, Content } = Layout;
 const { Option } = Select;
-
-// Scraper Control Card Component
-const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
-    const isRunning = status.status === 'running';
-
-    // Optimistic UI: Initialize with props, but allow immediate local input
-    const [localLimit, setLocalLimit] = useState(status.limit || 5);
-    const [localInterval, setLocalInterval] = useState(() => {
-        if (status.interval) return String(status.interval);
-        return "15"; // Default if undefined
-    });
-
-    useEffect(() => {
-        if (status.limit !== undefined) {
-            setLocalLimit(status.limit);
-        }
-        if (status.interval !== undefined) {
-            setLocalInterval(String(status.interval));
-        }
-    }, [status.limit, status.interval]);
-
-    // Console Auto-scroll Logic
-    const logContainerRef = useRef(null);
-    const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
-
-    useEffect(() => {
-        if (shouldAutoScroll && logContainerRef.current) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-        }
-    }, [status.logs, shouldAutoScroll]);
-
-    const handleScroll = () => {
-        if (logContainerRef.current) {
-            const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-            // tolerance of 10px
-            const isAtBottom = scrollHeight - scrollTop - clientHeight < 20;
-            setShouldAutoScroll(isAtBottom);
-        }
-    };
-
-    const handleConfigUpdate = (key, val) => {
-        if (key === 'limit') setLocalLimit(val);
-        if (key === 'interval') setLocalInterval(val);
-        onConfigChange(name, { [key]: val });
-    };
-
-    return (
-        <Col span={8}>
-            <Card
-                title={name}
-                extra={<Tag color={isRunning ? 'processing' : (status.status === 'error' ? 'error' : 'success')}>{status.status || 'Ready'}</Tag>}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-                    <span style={{ fontSize: 12 }}>限制条数:</span>
-                    <Select
-                        listHeight={180}
-                        value={localLimit}
-                        style={{ width: 80 }}
-                        size="small"
-                        onChange={(val) => handleConfigUpdate('limit', val)}
-                    >
-                        <Option value={5}>5</Option>
-                        <Option value={10}>10</Option>
-                        <Option value={15}>15</Option>
-                        <Option value={20}>20</Option>
-                        <Option value={30}>30</Option>
-                    </Select>
-
-                    <span style={{ fontSize: 12 }}>频率:</span>
-                    <Select
-                        listHeight={180}
-                        value={localInterval}
-                        style={{ width: 90 }}
-                        size="small"
-                        onChange={(val) => handleConfigUpdate('interval', val)}
-                    >
-                        <Option value="manual">手动</Option>
-                        <Option value="15">15分钟</Option>
-                        <Option value="30">30分钟</Option>
-                        <Option value="60">1小时</Option>
-                        <Option value="120">2小时</Option>
-                        <Option value="180">3小时</Option>
-                        <Option value="300">5小时</Option>
-                    </Select>
-
-                    {isRunning ? (
-                        <Button
-                            type="primary"
-                            danger
-                            size="small"
-                            icon={<PauseCircleOutlined />}
-                            onClick={() => onCancel(name)}
-                        >
-                            停止
-                        </Button>
-                    ) : (
-                        <Button
-                            type="primary"
-                            size="small"
-                            icon={<PlayCircleOutlined />}
-                            loading={isRunning}
-                            onClick={() => onRun(name, localLimit)}
-                        >
-                            运行
-                        </Button>
-                    )}
-                </div>
-
-                <div
-                    ref={logContainerRef}
-                    onScroll={handleScroll}
-                    style={{
-                        background: '#000',
-                        color: '#0f0',
-                        padding: '8px 12px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        height: 150,
-                        overflowY: 'auto',
-                        fontFamily: 'monospace'
-                    }}
-                >
-                    <div style={{ color: '#8c8c8c', marginBottom: 4, borderBottom: '1px solid #333', paddingBottom: 4 }}>
-                        &gt; CONSOLE OUTPUT
-                    </div>
-                    {status.logs && status.logs.length > 0 ? (
-                        status.logs.map((log, idx) => (
-                            <div key={idx} style={{ lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>{log}</div>
-                        ))
-                    ) : (
-                        <div style={{ color: '#666', textAlign: 'center', marginTop: 40 }}>
-                            {status.status === 'idle' && status.last_result ? status.last_result : 'WAITING FOR LOGS...'}
-                        </div>
-                    )}
-                </div>
-            </Card>
-        </Col>
-    );
-};
 
 const Dashboard = () => {
     const navigate = useNavigate();
@@ -166,6 +34,7 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(false);
     const [spiders, setSpiders] = useState([]);
     const [spiderStatus, setSpiderStatus] = useState({});
+    const [activeKey, setActiveKey] = useState('1');
 
     // Pagination
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
@@ -180,6 +49,35 @@ const Dashboard = () => {
     const [dedupPagination, setDedupPagination] = useState({ current: 1, pageSize: 20, total: 0 });
     const [dedupFilterSource, setDedupFilterSource] = useState(null);
     const [loadingDedup, setLoadingDedup] = useState(false);
+
+    // AI Filter and Best Tab (pagination for tab labels)
+    const [rejectedPagination, setRejectedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+    const [approvedPagination, setApprovedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+
+    // AI Filter State
+    const [rejectedNews, setRejectedNews] = useState([]);
+    const [rejectedLoading, setRejectedLoading] = useState(false);
+    const [approvedNews, setApprovedNews] = useState([]);
+    const [approvedLoading, setApprovedLoading] = useState(false);
+    const [aiFilterPrompt, setAiFilterPrompt] = useState('');
+    const [aiFilterHours, setAiFilterHours] = useState(8);
+    const [aiFiltering, setAiFiltering] = useState(false);
+
+    // 手动加精功能（全局状态，供多个Tab共享）
+    const [manuallyFeatured, setManuallyFeatured] = useState([]);
+
+    // 添加到加精列表
+    const handleAddToFeatured = (record) => {
+        // 先检查是否已存在
+        const exists = manuallyFeatured.find(n => n.id === record.id);
+        if (exists) {
+            message.warning('此新闻已在加精列表中');
+            return;
+        }
+        // 添加到列表
+        setManuallyFeatured(prev => [record, ...prev]);
+        message.success('已加精到新闻输出');
+    };
 
     const fetchStats = async () => {
         try {
@@ -263,6 +161,49 @@ const Dashboard = () => {
         navigate('/login');
     };
 
+    // 全局计数状态
+    const [globalCounts, setGlobalCounts] = useState({
+        news: 0,
+        dedup: 0,
+        filtered: 0,
+        curated: 0,
+        rejected: 0,
+        approved: 0
+    });
+
+    // 获取全局计数
+    const fetchGlobalCounts = async () => {
+        try {
+            // Parallel requests for counts (limit=1 is enough to get 'total')
+            const [newsRes, dedupRes, filteredRes, curatedRes, rejectedRes, approvedRes] = await Promise.all([
+                api.getNews({ page: 1, limit: 1 }),
+                api.getDeduplicatedNews({ page: 1, limit: 1 }),
+                api.getFilteredDedupNews({ page: 1, limit: 1 }),
+                api.getCuratedNews({ page: 1, limit: 1 }),
+                api.getFilteredCurated('rejected', 1, 1),  // Use positional params
+                api.getFilteredCurated('approved', 1, 1)   // Use positional params
+            ]);
+
+            setGlobalCounts({
+                news: newsRes.data.total || 0,
+                dedup: dedupRes.data.total || 0,
+                filtered: filteredRes.data.total || 0,
+                curated: curatedRes.data.total || 0,
+                rejected: rejectedRes.data.total || 0,
+                approved: approvedRes.data.total || 0
+            });
+        } catch (error) {
+            console.error("Failed to fetch global counts:", error);
+        }
+    };
+
+    // 初始加载和定期刷新计数
+    useEffect(() => {
+        fetchGlobalCounts();
+        const interval = setInterval(fetchGlobalCounts, 30000); // 30s auto refresh
+        return () => clearInterval(interval);
+    }, []);
+
     const handleRunSpider = async (name, items) => {
         try {
             await runSpider(name, items);
@@ -295,50 +236,10 @@ const Dashboard = () => {
         }
     };
 
-    const handleDeleteNews = async (id) => {
-        try {
-            await deleteNews(id);
-            message.success('删除成功');
-            fetchNews(pagination.current, filterSource);
-        } catch (e) {
-            message.error('删除失败');
-        }
-    };
 
-    const handleDeleteDedupNews = async (newsId) => {
-        try {
-            await deleteDeduplicatedNews(newsId);
-            message.success('删除成功');
-            fetchDedupNews(dedupPagination.current, dedupFilterSource);
-        } catch (e) {
-            message.error('删除失败');
-        }
-    };
-
-    const handleDeduplicate = async () => {
-        setDeduplicating(true);
-        try {
-            const res = await deduplicateNews(dedupTimeRange, 'mark');
-            const stats = res.data.stats;
-            message.success(
-                `去重完成！扫描 ${stats.total_scanned} 条，发现 ${stats.duplicates_found} 条重复，` +
-                `已标记 ${stats.duplicates_processed} 条，归档 ${stats.archived_count} 条原始数据`
-            );
-            fetchStats();
-            fetchNews(pagination.current, filterSource);
-        } catch (e) {
-            message.error('去重失败: ' + (e.response?.data?.detail || e.message));
-        } finally {
-            setDeduplicating(false);
-        }
-    };
 
     // Blacklist Logic
-    const [blacklistKeywords, setBlacklistKeywords] = useState([]);
-    const [newKeyword, setNewKeyword] = useState('');
-    const [newMatchType, setNewMatchType] = useState('contains');
-    const [filtering, setFiltering] = useState(false);
-    const [filterTimeRange, setFilterTimeRange] = useState(6); // Default 6 hours
+
 
     // Filtered News View
     const [filteredNews, setFilteredNews] = useState([]);
@@ -386,123 +287,14 @@ const Dashboard = () => {
         }
     };
 
-    const handleRestoreNews = async (id) => {
-        try {
-            await restoreNews(id, 'deduplicated_news');
-            message.success('还原成功');
-            fetchFilteredNews(filteredPagination.current);
-        } catch (e) {
-            message.error('还原失败');
-        }
-    };
 
-    const handleRestoreCurated = async (id) => {
-        try {
-            await restoreCuratedNews(id);
-            message.success('已还原');
-            fetchRejectedNews(rejectedPagination.current);
-            // Also refresh approved list just in case
-            fetchApprovedNews(approvedPagination.current);
-        } catch (e) {
-            message.error('还原失败');
-        }
-    };
+
 
 
     // Import API
     // (Note: imports are at top level, assuming they are added)
 
-    useEffect(() => {
-        // Fetch AI Config on Mount
-        const fetchAiConfig = async () => {
-            try {
-                const res = await getAiConfig();
-                if (res.data) {
-                    if (res.data.prompt) setAiFilterPrompt(res.data.prompt);
-                    if (res.data.hours) setAiFilterHours(res.data.hours);
-                }
-            } catch (e) {
-                console.error("Failed to fetch AI config", e);
-            }
-        };
-        fetchAiConfig();
-    }, []);
 
-    const handleSaveAiConfig = async () => {
-        try {
-            await setAiConfig({ prompt: aiFilterPrompt, hours: aiFilterHours });
-            // message.success('配置已保存'); // Optional: Don't spam user on auto-save
-        } catch (e) {
-            console.error("Failed to save AI config", e);
-        }
-    };
-
-    // AI Filtering Functions (添加在其他handler之后)
-    const handleAiFilter = async () => {
-        if (!aiFilterPrompt.trim()) {
-            message.warning('请输入筛选标准');
-            return;
-        }
-
-        // Auto-save config before running
-        await handleSaveAiConfig();
-
-        setAiFiltering(true);
-
-        try {
-            let offset = 0;
-            const batchSize = 20;  // 每批 20 条，避免 JSON 过长
-            let totalProcessed = 0;
-            let totalFiltered = 0;
-            let hasMore = true;
-            let totalCount = 0;
-
-            // 第一次调用获取总数
-            while (hasMore) {
-                const res = await filterCuratedNews({
-                    hours: aiFilterHours,
-                    filter_prompt: aiFilterPrompt,
-                    offset: offset,
-                    batch_size: batchSize
-                });
-
-                if (res.data.total !== undefined) {
-                    totalCount = res.data.total;
-                }
-
-                totalProcessed += res.data.processed || 0;
-                totalFiltered += res.data.filtered || 0;
-                hasMore = res.data.has_more || false;
-
-                // 安全检查：如果处理数量为0或已达到总数，强制退出
-                if (res.data.processed === 0 || totalProcessed >= totalCount) {
-                    hasMore = false;
-                }
-
-                offset += batchSize;
-
-                // 显示进度 - 使用实际处理的数量
-                const progress = totalCount > 0 ? Math.round((totalProcessed / totalCount) * 100) : 100;
-                message.loading({
-                    content: `处理中... ${totalProcessed}/${totalCount} (${progress}%)`,
-                    key: 'aiFilterProgress',
-                    duration: 0
-                });
-            }
-
-            message.destroy('aiFilterProgress');
-            message.success(`筛选完成！总共处理 ${totalProcessed} 条，拒绝 ${totalFiltered} 条`);
-
-            // 刷新两个列表
-            fetchRejectedNews(1);
-            fetchApprovedNews(1);
-        } catch (e) {
-            message.destroy('aiFilterProgress');
-            message.error('AI筛选失败: ' + (e.response?.data?.detail || e.message));
-        } finally {
-            setAiFiltering(false);
-        }
-    };
     const fetchRejectedNews = async (page = 1) => {
         setRejectedLoading(true);
         try {
@@ -535,139 +327,9 @@ const Dashboard = () => {
             setApprovedLoading(false);
         }
     };
-    const handleDeleteRejected = async (id) => {
-        try {
-            await deleteCuratedNews(id);
-            message.success('删除成功');
-            fetchRejectedNews(rejectedPagination.current);
-        } catch (e) {
-            message.error('删除失败');
-        }
-    };
-    const handleDeleteApproved = async (id) => {
-        try {
-            await deleteCuratedNews(id);
-            message.success('删除成功');
-            fetchApprovedNews(approvedPagination.current);
-        } catch (e) {
-            message.error('删除失败');
-        }
-    };
-
-    const fetchBlacklistData = async () => {
-        try {
-            const res = await getBlacklist();
-            setBlacklistKeywords(res.data.keywords || []);
-        } catch (e) {
-            console.error("Fetch blacklist failed", e);
-        }
-    };
-
-    const handleAddKeyword = async () => {
-        if (!newKeyword.trim()) return;
-        try {
-            await addBlacklist(newKeyword.trim(), newMatchType);
-            message.success('添加成功');
-            setNewKeyword('');
-            fetchBlacklistData();
-        } catch (e) {
-            message.error('添加失败，可能是重复词');
-        }
-    };
-
-    const handleDeleteKeyword = async (id) => {
-        try {
-            await deleteBlacklist(id);
-            message.success('删除成功');
-            fetchBlacklistData();
-        } catch (e) {
-            message.error('删除失败');
-        }
-    };
-
-    const handleFilterNews = async () => {
-        setFiltering(true);
-        try {
-            const res = await filterNews(filterTimeRange);
-            const stats = res.data.stats;
-            message.success(`过滤完成！扫描 ${stats.scanned} 条，标记过滤 ${stats.filtered} 条`);
-            fetchStats(); // Update stats if any
-        } catch (e) {
-            message.error('过滤任务执行失败');
-        } finally {
-            setFiltering(false);
-        }
-    };
-
-    // --- Telegram Logic ---
-    const [telegramConfig, setTelegramConfigState] = useState({ bot_token: '', chat_id: '', enabled: false });
-
-    useEffect(() => {
-        fetchTelegramConfig();
-    }, []);
-
-    const fetchTelegramConfig = async () => {
-        try {
-            const res = await getTelegramConfig();
-            setTelegramConfigState(res.data);
-        } catch (error) {
-            console.error("Failed to fetch Telegram config", error);
-        }
-    };
-
-    const handleSaveTelegramConfig = async () => {
-        try {
-            await setTelegramConfig(telegramConfig);
-            message.success("Telegram 配置已保存");
-        } catch (error) {
-            message.error("保存失败: " + (error.response?.data?.detail || error.message));
-        }
-    };
 
 
-    // --- DeepSeek Logic ---
-    const [deepseekConfig, setDeepSeekConfigState] = useState({ api_key: '', base_url: '', model: '' });
 
-    useEffect(() => {
-        fetchDeepSeekConfig();
-    }, []);
-
-    const fetchDeepSeekConfig = async () => {
-        try {
-            const res = await getDeepSeekConfig();
-            setDeepSeekConfigState(res.data);
-        } catch (error) {
-            console.error("Failed to fetch DeepSeek config", error);
-        }
-    };
-
-    const handleSaveDeepSeekConfig = async () => {
-        try {
-            await setDeepSeekConfig(deepseekConfig);
-            message.success("DeepSeek 配置已保存");
-        } catch (error) {
-            message.error("保存失败: " + (error.response?.data?.detail || error.message));
-        }
-    };
-
-    const handleTestDeepSeekConnection = async () => {
-        try {
-            await testDeepSeekConnection();
-            message.success("连接测试成功！API Key 和 Base URL 配置正确。");
-        } catch (error) {
-            message.error("连接测试失败: " + (error.response?.data?.detail || error.message));
-        }
-    };
-
-
-    const handleTestTelegramPush = async () => {
-        try {
-            await testTelegramPush();
-            message.success("测试消息发送成功，请检查 Telegram");
-        } catch (error) {
-            message.error("测试发送失败: " + (error.response?.data?.detail || error.message));
-        }
-    };
 
     // Export Logic
     const [exportVisible, setExportVisible] = useState(false);
@@ -724,325 +386,7 @@ const Dashboard = () => {
     };
 
 
-    const blacklistColumns = [
-        { title: '关键词', dataIndex: 'keyword', key: 'keyword', render: text => <Tag color="red">{text}</Tag> },
-        {
-            title: '匹配模式',
-            dataIndex: 'match_type',
-            key: 'match_type',
-            render: text => <Tag color={text === 'regex' ? 'purple' : 'blue'}>{text}</Tag>
-        },
-        { title: '创建时间', dataIndex: 'created_at', key: 'created_at' },
-        {
-            title: '操作',
-            key: 'action',
-            render: (_, record) => (
-                <Popconfirm title="确定删除？" onConfirm={() => handleDeleteKeyword(record.id)}>
-                    <Button type="link" danger size="small">删除</Button>
-                </Popconfirm>
-            )
-        },
-    ];
 
-
-
-    const columns = [
-        { title: 'ID', dataIndex: 'id', width: 60 },
-        {
-            title: '标题', dataIndex: 'title',
-            render: (text, record) => <a href={record.source_url} target="_blank" rel="noopener noreferrer">{text}</a>
-        },
-        {
-            title: '来源', dataIndex: 'source_site', width: 100,
-            render: text => <Tag color="blue">{text}</Tag>
-        },
-        {
-            title: '状态', dataIndex: 'stage', width: 90,
-            render: (stage) => {
-                if (stage === 'duplicate') {
-                    return <Tag color="red">重复</Tag>;
-                } else {
-                    return <Tag color="default">原始</Tag>;
-                }
-            }
-        },
-        {
-            title: '发布时间', dataIndex: 'published_at', width: 160,
-            render: text => {
-                const date = new Date(text);
-                return isNaN(date.getTime()) ? text : date.toLocaleString();
-            }
-        },
-        {
-            title: '操作', width: 80,
-            render: (_, record) => (
-                <Button
-                    type="link"
-                    danger
-                    size="small"
-                    onClick={() => handleDeleteNews(record.id)}
-                >
-                    删除
-                </Button>
-            )
-        }
-    ];
-
-    // 去重数据专用列定义
-    const dedupColumns = [
-        { title: 'ID', dataIndex: 'id', width: 60 },
-        {
-            title: '标题', dataIndex: 'title', ellipsis: true,
-            render: (text, record) => <a href={record.source_url} target="_blank" rel="noopener noreferrer">{text}</a>
-        },
-        { title: '来源', dataIndex: 'source_site', width: 120 },
-        {
-            title: '发布时间', dataIndex: 'published_at', width: 160,
-            render: text => {
-                const date = new Date(text);
-                return isNaN(date.getTime()) ? text : date.toLocaleString();
-            }
-        },
-        {
-            title: '归档时间', dataIndex: 'deduplicated_at', width: 160,
-            render: text => {
-                const date = new Date(text);
-                return isNaN(date.getTime()) ? text : date.toLocaleString();
-            }
-        },
-        {
-            title: '操作', width: 150,
-            render: (_, record) => (
-                <Space>
-                    <Button
-                        type="primary"
-                        size="small"
-                        onClick={() => {
-                            setManuallyFeatured(prev => {
-                                if (prev.find(n => n.id === record.id)) {
-                                    message.warning('此新闻已在加精列表中');
-                                    return prev;
-                                }
-                                message.success('已加精到新闻输出');
-                                return [record, ...prev];
-                            });
-                        }}
-                    >
-                        加精
-                    </Button>
-                    <Button
-                        type="link"
-                        danger
-                        size="small"
-                        onClick={() => handleDeleteDedupNews(record.id)}
-                    >
-                        删除
-                    </Button>
-                </Space>
-            )
-        }
-    ];
-
-    const curatedColumns = [
-        { title: 'ID', dataIndex: 'id', width: 60 },
-        { title: '标题', dataIndex: 'title', ellipsis: true, render: (text, record) => <a href={record.source_url} target="_blank" rel="noopener noreferrer">{text}</a> },
-        { title: '来源', dataIndex: 'source_site', width: 120 },
-        {
-            title: '发布时间', dataIndex: 'published_at', width: 160,
-            render: text => {
-                const date = new Date(text);
-                return isNaN(date.getTime()) ? text : date.toLocaleString();
-            }
-        },
-        {
-            title: '精选时间', dataIndex: 'curated_at', width: 160,
-            render: text => {
-                const date = new Date(text);
-                return isNaN(date.getTime()) ? text : date.toLocaleString();
-            }
-        },
-        {
-            title: '操作', width: 150,
-            render: (_, record) => (
-                <Space>
-                    <Button
-                        type="primary"
-                        size="small"
-                        onClick={() => {
-                            setManuallyFeatured(prev => {
-                                if (prev.find(n => n.id === record.id)) {
-                                    message.warning('此新闻已在加精列表中');
-                                    return prev;
-                                }
-                                message.success('已加精到新闻输出');
-                                return [record, ...prev];
-                            });
-                        }}
-                    >
-                        加精
-                    </Button>
-                    <Button
-                        type="link"
-                        danger
-                        size="small"
-                        onClick={() => handleDeleteCuratedNews(record.id)}
-                    >
-                        删除
-                    </Button>
-                </Space>
-            )
-        }
-    ];
-
-    // Rejected News Columns
-    const rejectedColumns = [
-        { title: 'ID', dataIndex: 'id', width: 60 },
-        {
-            title: '标题',
-            dataIndex: 'title',
-            render: (text, record) => (
-                <a href={record.source_url} target="_blank" rel="noopener noreferrer">
-                    {text}
-                </a>
-            )
-        },
-        {
-            title: 'AI 标签',
-            dataIndex: 'ai_explanation',
-            width: 200,
-            render: (text) => {
-                if (!text) return <span style={{ color: '#ccc' }}>-</span>;
-
-                // 解析格式: "8分-技术创新 #AI技术"
-                const parts = text.split(' ');
-                const scoreAndReason = parts[0]; // "8分-技术创新"
-                const tag = parts[1]; // "#AI技术"
-
-                const [score, reason] = scoreAndReason.split('-');
-
-                return (
-                    <span>
-                        <Tag color="blue">{score}</Tag>
-                        {reason && <span style={{ color: '#666', marginRight: 4 }}>{reason}</span>}
-                        {tag && <Tag color="green">{tag}</Tag>}
-                    </span>
-                );
-            }
-        },
-        { title: '来源', dataIndex: 'source_site', width: 100 },
-        {
-            title: '发布时间',
-            dataIndex: 'published_at',
-            width: 160,
-            render: text => new Date(text).toLocaleString()
-        },
-        {
-            title: '操作',
-            width: 150,
-            render: (_, record) => (
-                <Space>
-                    <Button type="link" onClick={() => handleRestoreCurated(record.id)}>还原</Button>
-                    <Popconfirm title="确定删除?" onConfirm={() => handleDeleteRejected(record.id)}>
-                        <Button type="link" danger>删除</Button>
-                    </Popconfirm>
-                </Space>
-            )
-        }
-    ];
-    // Approved News Columns
-    const approvedColumns = [
-        { title: 'ID', dataIndex: 'id', width: 60 },
-        {
-            title: '标题',
-            dataIndex: 'title',
-            render: (text, record) => (
-                <a href={record.source_url} target="_blank" rel="noopener noreferrer">
-                    {text}
-                </a>
-            )
-        },
-        {
-            title: 'AI 标签',
-            dataIndex: 'ai_explanation',
-            width: 200,
-            render: (text) => {
-                if (!text) return <span style={{ color: '#ccc' }}>-</span>;
-
-                // 解析格式: "8分-技术创新 #AI技术"
-                const parts = text.split(' ');
-                const scoreAndReason = parts[0]; // "8分-技术创新"
-                const tag = parts[1]; // "#AI技术"
-
-                const [score, reason] = scoreAndReason.split('-');
-
-                return (
-                    <span>
-                        <Tag color="blue">{score}</Tag>
-                        {reason && <span style={{ color: '#666', marginRight: 4 }}>{reason}</span>}
-                        {tag && <Tag color="green">{tag}</Tag>}
-                    </span>
-                );
-            }
-        },
-        {
-            title: '发布时间',
-            dataIndex: 'published_at',
-            width: 160,
-            render: text => new Date(text).toLocaleString()
-        },
-        { title: '来源', dataIndex: 'source_site', width: 100 },
-        {
-            title: '操作',
-            key: 'action',
-            width: 100,
-            render: (_, record) => (
-                <Popconfirm title="确定删除?" onConfirm={() => handleDeleteApproved(record.id)}>
-                    <Button type="link" danger>删除</Button>
-                </Popconfirm>
-            )
-        }
-    ];
-
-    const filteredColumns = [
-        ...dedupColumns.filter(c => c.dataIndex !== 'deduplicated_at' && c.title !== '操作'),
-        {
-            title: '操作', width: 200,
-            render: (_, record) => (
-                <Space>
-                    <Button
-                        type="primary"
-                        size="small"
-                        onClick={() => {
-                            const exists = manuallyFeatured.find(n => n.id === record.id);
-                            if (exists) {
-                                message.warning('此新闻已在加精列表中');
-                                return;
-                            }
-                            setManuallyFeatured(prev => [record, ...prev]);
-                            message.success('已加精到新闻输出');
-                        }}
-                    >
-                        加精
-                    </Button>
-                    <Button
-                        type="link"
-                        size="small"
-                        onClick={() => handleRestoreNews(record.id)}
-                    >
-                        还原
-                    </Button>
-                    <Button
-                        type="link"
-                        danger
-                        size="small"
-                        onClick={() => handleDeleteDedupNews(record.id)}
-                    >
-                        删除
-                    </Button>
-                </Space>
-            )
-        }
-    ];
 
     return (
         <Layout className="layout" style={{ minHeight: '100vh' }}>
@@ -1074,8 +418,9 @@ const Dashboard = () => {
 
                 <div style={{ background: '#fff', padding: 24, minHeight: 280 }}>
                     <Tabs
-                        defaultActiveKey="1"
+                        activeKey={activeKey}
                         onChange={(key) => {
+                            setActiveKey(key);
                             if (key === '1') {
                                 fetchNews(1, filterSource);
                                 fetchStats();
@@ -1083,421 +428,73 @@ const Dashboard = () => {
                                 fetchDedupNews(1, dedupFilterSource);
                             } else if (key === '5') { // Curated Data
                                 fetchCuratedNews(1, curatedFilterSource);
-                            } else if (key === '4') { // Filter Settings
-                                fetchBlacklistData();
-                                fetchFilteredNews(1);
-                            } else if (key === '6') { // Notification Settings
-                                fetchTelegramConfig();
                             } else if (key === '7') { // News Export
                                 // 新闻输出tab，无需自动加载数据（用户手动点击加载按钮）
                             } else if (key === '8') { // AI Filter Tab
                                 fetchRejectedNews(1);
+                                fetchGlobalCounts(); // Refresh counts when clicked
                             } else if (key === '9') { // AI Best Tab
                                 fetchApprovedNews(1);
+                                fetchGlobalCounts(); // Refresh counts when clicked
                             }
                         }}
                         items={[
                             {
                                 key: '1',
-                                label: <span><DatabaseOutlined />数据管理 ({pagination.total || 0})</span>,
-                                children: (
-                                    <>
-                                        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-                                            <Space>
-                                                <Select
-                                                    style={{ width: 200 }}
-                                                    placeholder="筛选来源"
-                                                    allowClear
-                                                    onChange={(val) => {
-                                                        setFilterSource(val);
-                                                        fetchNews(1, val);
-                                                    }}
-                                                >
-                                                    {spiders.map(s => <Option key={s} value={s}>{s}</Option>)}
-                                                </Select>
-
-                                                <Button icon={<DownloadOutlined />} onClick={() => handleShowExport('raw')}>导出</Button>
-
-                                                <div style={{ borderLeft: '1px solid #d9d9d9', height: 32, margin: '0 8px' }} />
-
-                                                <span style={{ fontSize: 14 }}>去重范围:</span>
-                                                <Select
-                                                    value={dedupTimeRange}
-                                                    style={{ width: 110 }}
-                                                    onChange={setDedupTimeRange}
-                                                >
-                                                    <Option value={6}>6小时内</Option>
-                                                    <Option value={12}>12小时内</Option>
-                                                    <Option value={24}>24小时内</Option>
-                                                    <Option value={48}>48小时内</Option>
-                                                </Select>
-                                                <Button
-                                                    type="primary"
-                                                    onClick={handleDeduplicate}
-                                                    loading={deduplicating}
-                                                >
-                                                    手动去重
-                                                </Button>
-                                            </Space>
-                                            <Button icon={<ReloadOutlined />} onClick={() => fetchNews(pagination.current, filterSource)}>刷新</Button>
-                                        </div>
-
-                                        <Table
-                                            columns={columns}
-                                            dataSource={news}
-                                            rowKey="id"
-                                            loading={loading}
-                                            pagination={{
-                                                ...pagination,
-                                                onChange: (page) => fetchNews(page, filterSource)
-                                            }}
-                                            expandable={{
-                                                expandedRowRender: record => (
-                                                    <div style={{ padding: 16, background: '#fafafa' }}>
-                                                        <p><strong>URL:</strong> <a href={record.source_url} target="_blank">{record.source_url}</a></p>
-                                                        <div style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflowY: 'auto' }}>
-                                                            {record.content || <span style={{ color: '#ccc' }}>No content available</span>}
-                                                        </div>
-                                                    </div>
-                                                ),
-                                                rowExpandable: record => true,
-                                            }}
-                                        />
-                                    </>
-                                )
+                                label: <span><DatabaseOutlined />数据管理 ({globalCounts.news})</span>,
+                                children: <NewsManagementTab spiders={spiders} onShowExport={handleShowExport} />
                             },
                             {
                                 key: '3',
-                                label: <span><DatabaseOutlined />去重数据 ({dedupPagination.total || 0})</span>,
-                                children: (
-                                    <>
-                                        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-                                            <Space>
-                                                <span style={{ fontSize: 14 }}>来源筛选:</span>
-                                                <Select
-                                                    value={dedupFilterSource}
-                                                    style={{ width: 150 }}
-                                                    onChange={(val) => {
-                                                        setDedupFilterSource(val);
-                                                        fetchDedupNews(1, val);
-                                                    }}
-                                                    allowClear
-                                                    placeholder="全部来源"
-                                                >
-                                                    {spiders.map(s => <Option key={s} value={s}>{s}</Option>)}
-                                                </Select>
-
-                                                <div style={{ borderLeft: '1px solid #d9d9d9', height: 32, margin: '0  8px' }} />
-
-                                                <span style={{ fontSize: 14 }}>去重范围:</span>
-                                                <Select
-                                                    value={dedupTimeRange}
-                                                    style={{ width: 110 }}
-                                                    onChange={setDedupTimeRange}
-                                                >
-                                                    <Option value={6}>6小时内</Option>
-                                                    <Option value={12}>12小时内</Option>
-                                                    <Option value={24}>24小时内</Option>
-                                                    <Option value={48}>48小时内</Option>
-                                                </Select>
-                                                <Button icon={<DownloadOutlined />} onClick={() => handleShowExport('deduplicated')}>导出</Button>
-                                            </Space>
-                                            <Button icon={<ReloadOutlined />} onClick={() => fetchDedupNews(dedupPagination.current, dedupFilterSource)}>刷新</Button>
-                                        </div>
-
-                                        <Table
-                                            columns={dedupColumns}
-                                            dataSource={dedupNews}
-                                            rowKey="id"
-                                            loading={loadingDedup}
-                                            pagination={{
-                                                ...dedupPagination,
-                                                showSizeChanger: false,
-                                                onChange: (page) => fetchDedupNews(page, dedupFilterSource)
-                                            }}
-                                            expandable={{
-                                                expandedRowRender: record => (
-                                                    <div style={{ padding: 16, background: '#fafafa' }}>
-                                                        <p><strong>URL:</strong> <a href={record.source_url} target="_blank">{record.source_url}</a></p>
-                                                        <div style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflowY: 'auto' }}>
-                                                            {record.content || <span style={{ color: '#ccc' }}>No content available</span>}
-                                                        </div>
-                                                    </div>
-                                                ),
-                                                rowExpandable: record => true,
-                                            }}
-                                        />
-                                    </>
-                                )
+                                label: <span><DatabaseOutlined />去重数据 ({globalCounts.dedup})</span>,
+                                children: <DeduplicatedTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
                             },
                             {
                                 key: '4',
-                                label: <span><DatabaseOutlined />过滤设置 ({filteredPagination.total || 0})</span>,
-                                children: (
-                                    <div style={{ padding: '0 10px' }}>
-                                        <div style={{ marginBottom: 20, borderBottom: '1px solid #eee', paddingBottom: 20 }}>
-                                            <h3>1. 执行本地过滤</h3>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                <span>扫描范围:</span>
-                                                <Select value={filterTimeRange} style={{ width: 120 }} onChange={setFilterTimeRange}>
-                                                    <Option value={6}>6小时内</Option>
-                                                    <Option value={12}>12小时内</Option>
-                                                    <Option value={24}>24小时内</Option>
-                                                    <Option value={48}>48小时内</Option>
-                                                </Select>
-                                                <Button type="primary" onClick={handleFilterNews} loading={filtering}>
-                                                    立即执行过滤
-                                                </Button>
-                                                <span style={{ color: '#999', fontSize: 13, marginLeft: 10 }}>
-                                                    (扫描 "raw" 和 "deduplicated" 状态的新闻，匹配黑名单则标记为 "filtered")
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <h3>2. 黑名单关键词管理</h3>
-                                            <div style={{ marginBottom: 16, display: 'flex', gap: 10 }}>
-                                                <Select value={newMatchType} style={{ width: 100 }} onChange={setNewMatchType}>
-                                                    <Option value="contains">包含</Option>
-                                                    <Option value="regex">正则</Option>
-                                                </Select>
-                                                <Input
-                                                    placeholder="输入屏蔽词..."
-                                                    style={{ width: 200 }}
-                                                    value={newKeyword}
-                                                    onChange={e => setNewKeyword(e.target.value)}
-                                                    onPressEnter={handleAddKeyword}
-                                                />
-                                                <Button type="primary" onClick={handleAddKeyword} icon={<PlusOutlined />}>添加</Button>
-                                            </div>
-                                            <Table
-                                                columns={blacklistColumns}
-                                                dataSource={blacklistKeywords}
-                                                rowKey="id"
-                                                pagination={{ pageSize: 10 }}
-                                                size="small"
-                                            />
-                                        </div>
-
-
-                                        <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid #eee' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                                                <h3>3. 已过滤新闻 (Filtered Results)</h3>
-                                                <Button icon={<ReloadOutlined />} onClick={() => fetchFilteredNews(filteredPagination.current)}>刷新</Button>
-                                            </div>
-                                            <Table
-                                                columns={filteredColumns} // Use filtered columns with restore
-                                                dataSource={filteredNews}
-                                                rowKey="id"
-                                                loading={loadingFiltered}
-                                                pagination={{
-                                                    ...filteredPagination,
-                                                    onChange: (page) => fetchFilteredNews(page)
-                                                }}
-                                                size="small"
-                                                expandable={{
-                                                    expandedRowRender: record => (
-                                                        <div style={{ padding: 16, background: '#fafafa' }}>
-                                                            <p><strong>URL:</strong> <a href={record.source_url} target="_blank">{record.source_url}</a></p>
-                                                            <p><strong>Flag:</strong> {record.site_importance_flag}</p>
-                                                            <div style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflowY: 'auto' }}>
-                                                                {record.content || <span style={{ color: '#ccc' }}>No content available</span>}
-                                                            </div>
-                                                        </div>
-                                                    ),
-                                                    rowExpandable: record => true,
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                )
+                                label: <span><DatabaseOutlined />过滤设置 ({globalCounts.filtered})</span>,
+                                children: <FilterSettingsTab onAddToFeatured={handleAddToFeatured} active={activeKey === '4'} />
                             },
                             {
                                 key: '5',
-                                label: <span><DatabaseOutlined />精选数据 ({curatedPagination.total || 0})</span>,
-                                children: (
-                                    <>
-                                        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-                                            <Space>
-                                                <span style={{ fontSize: 14 }}>来源筛选:</span>
-                                                <Select
-                                                    value={curatedFilterSource}
-                                                    style={{ width: 150 }}
-                                                    onChange={(val) => {
-                                                        setCuratedFilterSource(val);
-                                                        fetchCuratedNews(1, val);
-                                                    }}
-                                                    allowClear
-                                                    placeholder="全部来源"
-                                                >
-                                                    {spiders.map(s => <Option key={s} value={s}>{s}</Option>)}
-                                                </Select>
-                                                <Button icon={<DownloadOutlined />} onClick={() => handleShowExport('curated')}>导出</Button>
-                                            </Space>
-                                            <Button icon={<ReloadOutlined />} onClick={() => fetchCuratedNews(curatedPagination.current, curatedFilterSource)}>刷新</Button>
-                                        </div>
-
-                                        <Table
-                                            columns={curatedColumns}
-                                            dataSource={curatedNews}
-                                            rowKey="id"
-                                            loading={loadingCurated}
-                                            pagination={{
-                                                ...curatedPagination,
-                                                showSizeChanger: false,
-                                                onChange: (page) => fetchCuratedNews(page, curatedFilterSource)
-                                            }}
-                                            expandable={{
-                                                expandedRowRender: record => (
-                                                    <div style={{ padding: 16, background: '#fafafa' }}>
-                                                        <p><strong>URL:</strong> <a href={record.source_url} target="_blank">{record.source_url}</a></p>
-                                                        <div style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflowY: 'auto' }}>
-                                                            {record.content || <span style={{ color: '#ccc' }}>No content available</span>}
-                                                        </div>
-                                                    </div>
-                                                ),
-                                                rowExpandable: record => true,
-                                            }}
-                                        />
-                                    </>
-                                )
+                                label: <span><DatabaseOutlined />精选数据 ({globalCounts.curated})</span>,
+                                children: <CuratedNewsTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
                             },
                             {
                                 key: '8',
-                                label: <span><RobotOutlined />AI 筛选 ({rejectedPagination.total || 0})</span>,
-                                children: <AIFilterTab />
+                                label: <span><RobotOutlined />AI 筛选 ({globalCounts.rejected})</span>,
+                                children: <AIFilterTab onAddToFeatured={handleAddToFeatured} />
                             },
                             {
                                 key: '9',
-                                label: <span><DatabaseOutlined />AI 精选 ({approvedPagination.total || 0})</span>,
-                                children: <AIBestTab />
+                                label: <span><DatabaseOutlined />AI 精选 ({globalCounts.approved})</span>,
+                                children: <AIBestTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
                             },
                             {
                                 key: '2',
                                 label: <span><RobotOutlined />爬虫控制</span>,
                                 children: (
-                                    <Row gutter={[16, 16]}>
-                                        {spiders.map(name => (
-                                            <ScraperCard
-                                                key={name}
-                                                name={name}
-                                                status={spiderStatus[name] || {}}
-                                                onRun={handleRunSpider}
-                                                onCancel={handleStopSpider}
-                                                onConfigChange={handleConfigChange}
-                                            />
-                                        ))}
-                                    </Row>
+                                    <SpiderControlTab
+                                        spiders={spiders}
+                                        spiderStatus={spiderStatus}
+                                        onRun={handleRunSpider}
+                                        onCancel={handleStopSpider}
+                                        onConfigChange={handleConfigChange}
+                                    />
                                 )
                             },
+
+
+
+                            // ... (in items array)
                             {
                                 key: '6',
                                 label: <span><RobotOutlined />API 配置</span>,
-                                children: (
-
-
-                                    <div style={{ padding: '0 10px' }}>
-                                        <h3>Telegram 推送配置</h3>
-                                        <Card style={{ maxWidth: 600, marginTop: 20, marginBottom: 20 }}>
-                                            <div style={{ marginBottom: 16 }}>
-                                                <div style={{ marginBottom: 8 }}>Bot Token:</div>
-                                                <Input.Password
-                                                    value={telegramConfig.bot_token}
-                                                    onChange={e => setTelegramConfigState({ ...telegramConfig, bot_token: e.target.value })}
-                                                    placeholder="123456789:ABCDefGhIJKlmNoPQRstuVWxyz"
-                                                />
-                                                <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-                                                    从 @BotFather 获取
-                                                </div>
-                                            </div>
-
-                                            <div style={{ marginBottom: 16 }}>
-                                                <div style={{ marginBottom: 8 }}>Chat ID:</div>
-                                                <Input
-                                                    value={telegramConfig.chat_id}
-                                                    onChange={e => setTelegramConfigState({ ...telegramConfig, chat_id: e.target.value })}
-                                                    placeholder="@channel_name or -100xxxxxxxx"
-                                                />
-                                                <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-                                                    目标频道/群组 ID，需先将 Bot 拉入并设为管理员
-                                                </div>
-                                            </div>
-
-                                            <div style={{ marginBottom: 24 }}>
-                                                <Checkbox
-                                                    checked={telegramConfig.enabled}
-                                                    onChange={e => setTelegramConfigState({ ...telegramConfig, enabled: e.target.checked })}
-                                                >
-                                                    启用自动推送 (仅推送 "精选数据")
-                                                </Checkbox>
-                                            </div>
-
-                                            <Space>
-                                                <Button type="primary" onClick={handleSaveTelegramConfig}>保存配置</Button>
-                                                <Button onClick={handleTestTelegramPush}>发送测试消息</Button>
-                                            </Space>
-                                        </Card>
-
-
-                                        <h3>大模型 API 配置</h3>
-                                        <Card style={{ maxWidth: 600, marginTop: 20 }}>
-                                            <div style={{ marginBottom: 16 }}>
-                                                <div style={{ marginBottom: 8 }}>API Key:</div>
-                                                <Input.Password
-                                                    value={deepseekConfig.api_key}
-                                                    onChange={e => setDeepSeekConfigState({ ...deepseekConfig, api_key: e.target.value })}
-                                                    placeholder="sk-..."
-                                                />
-                                            </div>
-
-                                            <div style={{ marginBottom: 16 }}>
-                                                <div style={{ marginBottom: 8 }}>Model:</div>
-                                                <Select
-                                                    value={deepseekConfig.model}
-                                                    style={{ width: '100%' }}
-                                                    onChange={(value) => {
-                                                        let newBaseUrl = deepseekConfig.base_url;
-                                                        if (value === 'deepseek-chat' || value === 'deepseek-reasoner') {
-                                                            newBaseUrl = 'https://api.deepseek.com';
-                                                        } else if (value.startsWith('gpt-')) {
-                                                            newBaseUrl = 'https://api.openai.com/v1';
-                                                        } else if (value.startsWith('claude-')) {
-                                                            newBaseUrl = 'https://api.anthropic.com/v1';
-                                                        }
-                                                        setDeepSeekConfigState({ ...deepseekConfig, model: value, base_url: newBaseUrl });
-                                                    }}
-                                                    placeholder="选择或输入模型"
-                                                >
-                                                    <Option value="deepseek-chat">deepseek-chat</Option>
-                                                    <Option value="deepseek-reasoner">deepseek-reasoner</Option>
-                                                    <Option value="gpt-4o">gpt-4o</Option>
-                                                    <Option value="gpt-4o-mini">gpt-4o-mini</Option>
-                                                    <Option value="claude-3-5-sonnet-20240620">claude-3-5-sonnet-20240620</Option>
-                                                </Select>
-                                            </div>
-
-                                            <div style={{ marginBottom: 16 }}>
-                                                <div style={{ marginBottom: 8 }}>Base URL:</div>
-                                                <Input
-                                                    value={deepseekConfig.base_url}
-                                                    onChange={e => setDeepSeekConfigState({ ...deepseekConfig, base_url: e.target.value })}
-                                                    placeholder="https://api.deepseek.com"
-                                                />
-                                            </div>
-
-                                            <Space>
-                                                <Button type="primary" onClick={handleSaveDeepSeekConfig}>保存配置</Button>
-                                                <Button onClick={handleTestDeepSeekConnection}>连接测试</Button>
-                                            </Space>
-                                        </Card>
-
-                                    </div>
-                                )
+                                children: <ApiSettingsTab />
                             },
                             {
                                 key: '7',
                                 label: <span><DownloadOutlined />新闻输出</span>,
-                                children: <ExportTab />
+                                children: <ExportTab manuallyFeatured={manuallyFeatured} setManuallyFeatured={setManuallyFeatured} />
                             }
                         ]}
                     />

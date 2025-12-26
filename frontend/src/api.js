@@ -80,8 +80,8 @@ export const login = async (password) => {
 };
 
 export const getStats = () => api.get('/stats');
-export const getNews = (page = 1, limit = 50, source = null, stage = null) =>
-    api.get('/news', { params: { page, limit, source, stage } });
+export const getNews = (page = 1, limit = 50, source = null, stage = null, keyword = null) =>
+    api.get('/news', { params: { page, limit, source, stage, keyword } });
 export const getSpiders = () => api.get('/spiders');
 export const getSpiderStatus = () => api.get('/spiders/status');
 export const deleteNews = (id) => api.delete(`/news/${id}`);
@@ -90,16 +90,22 @@ export const cancelScraper = (name) => api.post(`/spiders/stop/${name}`);
 export const updateConfig = (name, { interval, limit }) => api.post(`/spiders/config/${name}`, { interval, limit });
 export const deduplicateNews = (timeWindowHours, action = 'mark') =>
     api.post('/news/deduplicate', { time_window_hours: timeWindowHours, action });
-export const getDeduplicatedNews = (page = 1, limit = 50, source = null) =>
-    api.get('/deduplicated/news', { params: { page, limit, source } });
+export const getDeduplicatedNews = (page = 1, limit = 50, source = null, keyword = null) =>
+    api.get('/deduplicated/news', { params: { page, limit, source, keyword } });
 export const getDeduplicatedStats = () =>
     api.get('/deduplicated/stats');
 
 export const deleteDeduplicatedNews = (newsId) =>
     api.delete(`/deduplicated/news/${newsId}`);
 
-export const getCuratedNews = (page = 1, limit = 50, source = null) =>
-    api.get('/curated/news', { params: { page, limit, source } });
+export const batchRestoreDeduplicated = () =>
+    api.post('/deduplicated/batch_restore_all');
+
+export const batchRestoreFiltered = () =>
+    api.post('/filtered/batch_restore_all');
+
+export const getCuratedNews = (page = 1, limit = 50, source = null, keyword = null) =>
+    api.get('/curated/news', { params: { page, limit, source, keyword } });
 
 export const getCuratedStats = () => api.get('/curated/stats');
 
@@ -109,8 +115,8 @@ export const deleteCuratedNews = (newsId) =>
 export const restoreNews = (newsId, sourceTable = 'deduplicated_news') =>
     api.post(`/news/restore/${newsId}`, { source_table: sourceTable });
 
-export const getFilteredDedupNews = (page = 1, limit = 50) =>
-    api.get('/filtered/dedup/news', { params: { page, limit } });
+export const getFilteredDedupNews = (page = 1, limit = 50, keyword = null) =>
+    api.get('/filtered/dedup/news', { params: { page, limit, keyword } });
 
 // Blacklist APIs
 export const getBlacklist = () => api.get('/blacklist');
@@ -137,8 +143,8 @@ export const filterCuratedNews = (params) =>
 export const getAiConfig = () => api.get('/ai/config');
 export const setAiConfig = (config) => api.post('/ai/config', config);
 
-export const getFilteredCurated = (status, page = 1, limit = 50) =>
-    api.get('/curated/filtered', { params: { status, page, limit } });
+export const getFilteredCurated = (status, page = 1, limit = 50, source = null, keyword = null) =>
+    api.get('/curated/filtered', { params: { status, page, limit, source, keyword } });
 
 export const restoreCuratedNews = (id) => api.post(`/curated/restore/${id}`);
 export const batchRestoreCurated = () => api.post('/curated/batch_restore');

@@ -474,7 +474,8 @@ def get_stats():
         raise DatabaseError(f"查询统计失败: {str(e)}")
 
 @app.get("/api/news")
-def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None):
+@app.get("/api/news")
+def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None, keyword: Optional[str] = None):
     """Get news list with pagination"""
     try:
         conn = db.connect()
@@ -492,6 +493,12 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
             query += " AND stage = ?"
             params.append(stage)
         
+        if keyword:
+            query += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
+        
         query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         
@@ -507,6 +514,11 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         if stage:
             count_query += " AND stage = ?"
             count_params.append(stage)
+        if keyword:
+            count_query += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            count_params.append(term)
+            count_params.append(term)
             
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()[0]
@@ -531,9 +543,9 @@ def delete_news(news_id: int):
     raise NotFoundError("新闻不存在或删除失败")
 
 @app.get("/api/deduplicated/news")
-def get_deduplicated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None):
+def get_deduplicated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
     """获取已去重的数据"""
-    result = db.get_deduplicated_news(page, limit, source)
+    result = db.get_deduplicated_news(page, limit, source, keyword)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -555,10 +567,96 @@ def delete_deduplicated_news(news_id: int):
         return APIResponse.success(message="删除成功")
     raise NotFoundError("数据不存在或删除失败")
 
+@app.post("/api/deduplicated/batch_restore_all")
+async def batch_restore_all_deduplicated():
+    """批量还原所有去重数据到 raw 状态"""
+    db_instance = Database()
+    try:
+        conn = db_instance.connect()
+        cursor = conn.cursor()
+        
+        # 查询所有 deduplicated_news 记录（不限 stage）
+        cursor.execute("""
+            SELECT id, original_news_id 
+            FROM deduplicated_news
+        """)
+        rows = cursor.fetchall()
+        processed_count = len(rows)
+        
+        if processed_count > 0:
+            # 收集所有 original_news_id
+            news_ids = [row[1] for row in rows if row[1] is not None]
+            
+            # 将对应的 news 记录的 stage 改回 'raw'
+            if news_ids:
+                placeholders = ','.join('?' * len(news_ids))
+                cursor.execute(f"""
+                    UPDATE news 
+                    SET stage = 'raw'
+                    WHERE id IN ({placeholders})
+                """, news_ids)
+            
+            # 删除所有 deduplicated_news 记录
+            cursor.execute("DELETE FROM deduplicated_news")
+            
+            # 同时删除 curated_news 中对应的记录（如果存在）
+            if news_ids:
+                cursor.execute(f"""
+                    DELETE FROM curated_news 
+                    WHERE original_news_id IN ({placeholders})
+                """, news_ids)
+            
+            conn.commit()
+        
+        conn.close()
+        
+        return APIResponse.success(
+            data={"restored_count": processed_count},
+            message=f"成功还原 {processed_count} 条数据到原始状态，可重新去重"
+        )
+    except Exception as e:
+        logger.error(f"批量还原去重数据失败: {e}")
+        raise DatabaseError(f"批量还原失败: {str(e)}")
+
+@app.post("/api/filtered/batch_restore_all")
+async def batch_restore_all_filtered():
+    """批量还原已过滤和已精选的数据，重新执行本地过滤"""
+    db_instance = Database()
+    try:
+        conn = db_instance.connect()
+        cursor = conn.cursor()
+        
+        # 查询需要还原的数据数量（filtered + curated）
+        cursor.execute("SELECT COUNT(*) FROM deduplicated_news WHERE stage IN ('filtered', 'curated')")
+        restore_count = cursor.fetchone()[0]
+        
+        if restore_count > 0:
+            # 将 filtered 和 curated 都改回 deduplicated
+            cursor.execute("""
+                UPDATE deduplicated_news 
+                SET stage = 'deduplicated'
+                WHERE stage IN ('filtered', 'curated')
+            """)
+            
+            # 清空 curated_news 表
+            cursor.execute("DELETE FROM curated_news")
+            
+            conn.commit()
+        
+        conn.close()
+        
+        return APIResponse.success(
+            data={"restored_count": restore_count},
+            message=f"成功还原 {restore_count} 条数据，可重新执行本地过滤"
+        )
+    except Exception as e:
+        logger.error(f"批量还原已过滤数据失败: {e}")
+        raise DatabaseError(f"批量还原失败: {str(e)}")
+
 @app.get("/api/curated/news")
-def get_curated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None):
+def get_curated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
     """获取精选数据"""
-    result = db.get_curated_news(page, limit, source)
+    result = db.get_curated_news(page, limit, source, keyword)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -638,6 +736,7 @@ async def ai_filter_curated(req: AIFilterRequest):
     # 支持分页处理以优化速度
     from datetime import datetime, timedelta
     cutoff_time = (datetime.now() - timedelta(hours=req.hours)).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[DEBUG] AI Filter: Hours={req.hours}, Cutoff={cutoff_time}")
     
     conn = db.connect()
     cursor = conn.cursor()
@@ -648,16 +747,17 @@ async def ai_filter_curated(req: AIFilterRequest):
         (cutoff_time,)
     )
     total_count = cursor.fetchone()[0]
+    print(f"[DEBUG] AI Filter: Found {total_count} items to process")
     
     if total_count == 0:
         conn.close()
         return APIResponse.success(
-            data={"processed": 0, "total": 0},
+            data={"processed": 0, "filtered": 0, "total": 0},
             message="没有待筛选的数据"
         )
     
-    # 获取当前批次的数据（默认每批 20 条，避免 JSON 过长被截断）
-    batch_size = getattr(req, 'batch_size', 20)
+    # 获取当前批次的数据（默认每批 10 条，避免 JSON 过长被截断）
+    batch_size = getattr(req, 'batch_size', 10)
     offset = getattr(req, 'offset', 0)
     
     cursor.execute(
@@ -745,6 +845,7 @@ async def ai_filter_curated(req: AIFilterRequest):
                 "processed": updated_count,
                 "filtered": filtered_count,
                 "total": total_count,
+                "results": results,  # 返回详细处理结果
                 "offset": offset,
                 "has_more": (offset + batch_size) < total_count
             },
@@ -907,12 +1008,12 @@ def restore_curated_news_api(news_id: int):
 
 
 @app.get("/api/curated/filtered")
-def get_filtered_curated(status: str, page: int = 1, limit: int = 50):
+def get_filtered_curated(status: str, page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
     """获取筛选后的精选数据 (approved 或 rejected)"""
     db = Database()
     if status not in ['approved', 'rejected']:
         raise ValidationError("status 必须是 'approved' 或 'rejected'")
-    result = db.get_filtered_curated_news(status, page, limit)
+    result = db.get_filtered_curated_news(status, page, limit, source, keyword)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -921,8 +1022,8 @@ def get_filtered_curated(status: str, page: int = 1, limit: int = 50):
     )
 
 @app.get("/api/filtered/dedup/news")
-def get_filtered_dedup_news_api(page: int = 1, limit: int = 50):
-    result = db.get_filtered_dedup_news(page, limit)
+def get_filtered_dedup_news_api(page: int = 1, limit: int = 50, keyword: Optional[str] = None):
+    result = db.get_filtered_dedup_news(page, limit, keyword)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
