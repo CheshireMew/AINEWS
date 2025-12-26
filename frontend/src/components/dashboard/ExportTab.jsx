@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Card, Button, Select, Space, Table, Tag, message } from 'antd';
-import { getExportNews } from '../api';
+import { getExportNews } from '../../api';
 
 const { Option } = Select;
 
