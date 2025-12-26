@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getStats, getNews, runSpider, getSpiders, getSpiderStatus, deleteNews, cancelScraper, updateConfig, deduplicateNews, getDeduplicatedNews, deleteDeduplicatedNews, getBlacklist, addBlacklist, deleteBlacklist, filterNews, exportNews, getCuratedNews, getCuratedStats, deleteCuratedNews, restoreNews, getFilteredDedupNews, getTelegramConfig, setTelegramConfig, testTelegramPush, filterCuratedNews, getFilteredCurated, getDeepSeekConfig, setDeepSeekConfig, testDeepSeekConnection, restoreCuratedNews, getAiConfig, setAiConfig, batchRestoreCurated, clearAllAiStatus, getExportNews } from '../api';
+import ExportTab from '../components/dashboard/ExportTab';
 import dayjs from 'dayjs'; // Import dayjs
 
 
@@ -191,13 +192,7 @@ const Dashboard = () => {
     const [approvedLoading, setApprovedLoading] = useState(false);
     const [approvedPagination, setApprovedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
-    // News Export States
-    const [exportTimeRange, setExportTimeRange] = useState(24); // 24小时
-    const [exportMinScore, setExportMinScore] = useState(6); // 最低6分
-    const [exportNews, setExportNews] = useState([]);
-    const [newsExportLoading, setNewsExportLoading] = useState(false);
-    const [selectedNewsIds, setSelectedNewsIds] = useState([]);
-    const [manuallyFeatured, setManuallyFeatured] = useState([]); // 手动加精的新闻列表
+    // ExportTab组件已独立，不再需要这些状态
 
     const fetchStats = async () => {
         try {
