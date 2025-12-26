@@ -145,6 +145,9 @@ class ChainCatcherScraper(BaseScraper):
                     content_selectors = ['.rich_text_content', '.article-content']
                     content = await self.fetch_full_content(url, content_selectors)
                 
+                # 清理内容前缀
+                content = self.clean_content(content, title)
+                
                 # Fallback
                 if not content or len(content) < 10:
                     content = title

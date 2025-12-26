@@ -912,7 +912,7 @@ class Database:
                 where_clause = "WHERE source_site = ?"
                 params.append(source)
             offset = (page - 1) * limit
-            query = f'SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type FROM curated_news {where_clause} ORDER BY curated_at DESC LIMIT ? OFFSET ?'
+            query = f'SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type FROM curated_news {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?'
             params.extend([limit, offset])
             cursor.execute(query, params)
             rows = cursor.fetchall()
@@ -936,7 +936,7 @@ class Database:
                        stage, type, ai_status, ai_summary 
                        FROM curated_news 
                        WHERE ai_status = ? 
-                       ORDER BY curated_at DESC LIMIT ? OFFSET ?'''
+                       ORDER BY published_at DESC LIMIT ? OFFSET ?'''
             cursor.execute(query, (ai_status, limit, offset))
             rows = cursor.fetchall()
             cursor.execute('SELECT COUNT(*) FROM curated_news WHERE ai_status = ?', (ai_status,))
@@ -960,14 +960,37 @@ class Database:
             return []
 
     def delete_curated_news(self, news_id: int) -> bool:
-        """删除精选数据"""
+        """删除精选数据（级联删除所有相关数据）"""
         try:
             conn = self.connect()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM curated_news WHERE id = ?", (news_id,))
+            
+            # 1. 先获取source_url
+            cursor.execute("SELECT source_url FROM curated_news WHERE id = ?", (news_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                conn.close()
+                return False
+            
+            source_url = row['source_url']
+            
+            # 2. 级联删除：从所有表中删除相同URL的记录
+            cursor.execute("DELETE FROM news WHERE source_url = ?", (source_url,))
+            deleted_news = cursor.rowcount
+            
+            cursor.execute("DELETE FROM deduplicated_news WHERE source_url = ?", (source_url,))
+            deleted_dedup = cursor.rowcount
+            
+            cursor.execute("DELETE FROM curated_news WHERE source_url = ?", (source_url,))
+            deleted_curated = cursor.rowcount
+            
             conn.commit()
             conn.close()
-            return cursor.rowcount > 0
+            
+            print(f"级联删除完成: news({deleted_news}), dedup({deleted_dedup}), curated({deleted_curated})")
+            return True
+            
         except Exception as e:
             print(f"删除精选数据失败: {e}")
             return False
@@ -1029,7 +1052,7 @@ class Database:
             conn = self.connect()
             cursor = conn.cursor()
             offset = (page - 1) * limit
-            query = f"SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type FROM deduplicated_news WHERE stage = 'filtered' ORDER BY deduplicated_at DESC LIMIT ? OFFSET ?"
+            query = f"SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type FROM deduplicated_news WHERE stage = 'filtered' ORDER BY published_at DESC LIMIT ? OFFSET ?"
             params = [limit, offset]
             cursor.execute(query, params)
             rows = cursor.fetchall()
@@ -1057,7 +1080,7 @@ class Database:
                 where_clause = "(ai_status = 'approved' OR ai_status = 'restored')"
                 params = []
             
-            query = f"SELECT * FROM curated_news WHERE {where_clause} ORDER BY curated_at DESC LIMIT ? OFFSET ?"
+            query = f"SELECT * FROM curated_news WHERE {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             
             cursor.execute(query, params)

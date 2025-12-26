@@ -1723,9 +1723,14 @@ const Dashboard = () => {
                                                             message.warning('请先选择要复制的新闻');
                                                             return;
                                                         }
-                                                        const text = selected.map(n => n.title).join('\n');
+                                                        const text = selected.map(n => {
+                                                            if (n.content) {
+                                                                return `${n.title}\n\n${n.content}`;
+                                                            }
+                                                            return n.title;
+                                                        }).join('\n\n---\n\n');
                                                         navigator.clipboard.writeText(text);
-                                                        message.success(`已复制 ${selected.length} 条新闻标题`);
+                                                        message.success(`已复制 ${selected.length} 条新闻（含标题和内容）`);
                                                     }}>
                                                         复制为纯文本
                                                     </Button>
@@ -1769,6 +1774,16 @@ const Dashboard = () => {
                                             rowSelection={{
                                                 selectedRowKeys: selectedNewsIds,
                                                 onChange: (selectedKeys) => setSelectedNewsIds(selectedKeys)
+                                            }}
+                                            expandable={{
+                                                expandedRowRender: (record) => (
+                                                    <div style={{ padding: '12px 24px', backgroundColor: '#fafafa' }}>
+                                                        <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                                            {record.content || '暂无内容'}
+                                                        </p>
+                                                    </div>
+                                                ),
+                                                rowExpandable: (record) => !!record.content
                                             }}
                                             columns={[
                                                 {

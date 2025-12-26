@@ -100,6 +100,9 @@ class TechFlowScraper(BaseScraper):
                     content_selectors=['.art_detail_content']  # TechFlow特定选择器
                 ) if url else ""
                 
+                # 清理内容前缀
+                full_content = self.clean_content(full_content, title)
+                
                 # 如果没获取到内容，使用摘要
                 if not full_content or len(full_content) < 50:
                     full_content = summary

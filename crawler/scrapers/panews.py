@@ -140,15 +140,26 @@ class PANewsScraper(BaseScraper):
                         await detail_page.goto(url, timeout=15000)
                         await detail_page.wait_for_timeout(1500)
                         
-                        # 尝试多个选择器
-                        for selector in ['article.prose', '.article-content', 'article']:
+                        # 尝试多个选择器 - PANews使用article.prose
+                        for selector in ['article.prose', 'article', '.article-content', '.content']:
                             content_el = await detail_page.query_selector(selector)
                             if content_el:
-                                # 确保使用 inner_text() 而不是 innerHTML
-                                content = await content_el.inner_text()
-                                content = content.strip()
-                                if content and len(content) > 50:
+                                # 使用 inner_text() 获取纯文本
+                                raw_content = await content_el.inner_text()
+                                raw_content = raw_content.strip()
+                                print(f"  [DEBUG] 使用选择器 '{selector}' 获取到 {len(raw_content)} 字符")
+                                
+                                # 先清理内容
+                                content = self.clean_content(raw_content, title)
+                                print(f"  [DEBUG] 清理后剩余 {len(content)} 字符")
+                                
+                                # 检查清理后的内容长度
+                                if content and len(content) > 20:
+                                    print(f"  [DEBUG] 内容足够，使用此选择器")
                                     break
+                                # 如果清理后内容太短，尝试下一个选择器
+                                print(f"  [DEBUG] 内容太短，尝试下一个选择器")
+                                content = ''
                         
                         await detail_page.close()
                     except Exception as e:
@@ -156,10 +167,8 @@ class PANewsScraper(BaseScraper):
                
                 # Fallback
                 if not content or len(content) < 10:
+                    print(f"  [DEBUG] 使用fallback: content长度={len(content) if content else 0}")
                     content = title
-                
-                # 清理内容
-                content = self.clean_content(content, title)
                 
                 news_item = {
                     'title': title,

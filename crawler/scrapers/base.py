@@ -116,24 +116,36 @@ class BaseScraper(ABC):
         
         # 2. 去除各网站的固定前缀
         prefixes = [
-            r'Odaily星球日报讯\s*',
-            r'PANews\s+\d+月\d+日消息[，,]\s*',
-            r'ChainCatcher\s*消息[，,]\s*',
-            r'BlockBeats\s*消息[，,]\s*',
-            r'深潮\s*TechFlow\s*消息[，,]\s*',
-            r'Foresight\s*News\s*消息[，,]\s*',
-            r'火星财经消息[，,]\s*',
-            r'MarsBit\s*消息[，,]\s*',
+            r'Odaily\s*星球日报讯[\s，,]*',
+            r'PANews\s+\d+月\d+日消息[\s，,]*',
+            r'ChainCatcher\s*消息[\s，,]*',
+            r'BlockBeats\s*消息[\s，,]*',
+            r'深潮\s*TechFlow\s*消息[\s，,]*',
+            r'Foresight\s*News\s*消息[\s，,]*',
+            r'火星财经消息[\s，,]*',
+            r'MarsBit\s*消息[\s，,]*',
         ]
         
         for prefix_pattern in prefixes:
             content = re.sub(prefix_pattern, '', content, flags=re.IGNORECASE)
         
+        
         # 3. 如果提供了标题，且内容开头包含标题，则去除
+        # 但要确保删除后内容仍然完整（有足够长度且有意义）
         if title and content.startswith(title):
-            content = content[len(title):].strip()
-            # 去除可能跟随的标点符号
-            content = re.sub(r'^[，,：:、\s]+', '', content)
+            remaining = content[len(title):].strip()
+            # 只在以下情况删除标题：
+            # 1. 标题后有明确的分隔符（换行、句号、问号、感叹号）
+            # 2. 或者剩余内容足够长（至少50个字符）且以标点开头
+            if remaining:
+                # 检查是否以常见分隔符开头
+                if remaining[0] in '。？！\n\r，,：:':
+                    # 去除可能跟随的标点符号和空格
+                    content = re.sub(r'^[，,：:、。？！\s]+', '', remaining)
+                elif len(remaining) > 50 and not remaining[0].isalnum():
+                    # 剩余内容较长且以非字母数字开头（如标点），可能是分隔
+                    content = re.sub(r'^[，,：:、\s]+', '', remaining)
+                # 否则保留完整内容（不删除标题）
         
         return content.strip()
     
@@ -162,13 +174,27 @@ class BaseScraper(ABC):
         match = re.search(r'今天\s+(\d{1,2}):(\d{2})', time_str)
         if match:
             hour, minute = int(match.group(1)), int(match.group(2))
-            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # 如果时间在未来，说明是昨天
+            if dt > now:
+                dt -= timedelta(days=1)
+            return dt
         
         # 匹配"MM月DD日 HH:MM"
         match = re.search(r'(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})', time_str)
         if match:
             month, day, hour, minute = map(int, match.groups())
-            return now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            # 使用datetime构造，避免replace跨月问题
+            try:
+                dt = datetime(now.year, month, day, hour, minute, 0)
+            except ValueError:
+                # 日期无效，使用当前时间
+                return now
+            else:
+                # 如果时间在未来（跨年情况），使用去年
+                if dt > now:
+                    dt = dt.replace(year=now.year - 1)
+                return dt
 
         # 匹配纯 "HH:MM" (假设是今天)
         match = re.search(r'^(\d{1,2}):(\d{2})$', time_str.strip())

@@ -99,6 +99,9 @@ class BlockBeatsScraper(BaseScraper):
                     ]
                     content = await self.fetch_full_content(url, content_selectors)
                 
+                # 清理内容前缀
+                content = self.clean_content(content, title)
+                
                 # 如果没获取到内容，使用标题作为fallback
                 if not content or len(content) < 10:
                     content = title

@@ -174,7 +174,7 @@ AINEWS/
 - **排序**: 按AI评分从高到低
 - **手动加精**: 从其他tab临时添加新闻（带⭐标记）
 - **复制格式**:
-  - 纯文本: 每行一个标题
+  - 纯文本: 标题+内容，新闻间用 `---` 分隔
   - Markdown: `- [标题](链接)`
   - Telegram: `<a href="链接">标题</a>`
 
@@ -427,6 +427,7 @@ npm run dev
 ### 7. 新闻输出 (Tab 7) ⭐ 核心功能
 - 按时间范围和评分筛选AI精选新闻
 - 显示手动加精的新闻（带⭐标记）
+- **展开查看**：点击展开图标查看新闻完整内容
 - 全选/反选/清空
 - 多格式复制（纯文本/Markdown/TG）
 - 查看已选数量
@@ -435,12 +436,13 @@ npm run dev
 - 配置AI筛选提示词
 - 批量提交新闻给AI评分
 - 查看被拒绝的新闻
-- 删除低质量新闻
+- **永久删除**：删除的新闻从所有数据库表中彻底清除
 
 ### 9. AI精选 (Tab 9)
 - 查看AI通过的高质量新闻
 - 显示AI评分和标签
-- 删除或导出
+- **永久删除**：删除的新闻从所有数据库表中彻底清除
+- 导出数据
 
 ---
 
@@ -569,4 +571,73 @@ backend/test_api.py  # API测试
 
 ---
 
-*文档创建于 2025-12-26，基于项目当前状态*
+## 🔧 常见修改场景快速指南
+
+### 核心参数修改
+
+| 修改内容 | 文件位置 | 具体行数/参数 | 说明 |
+|---------|---------|-------------|------|
+| **去重相似度阈值** | `crawler/config/filters.yaml` | `similarity_threshold: 0.50` | 当前50%，越高越严格 |
+| **去重时间窗口** | `crawler/config/filters.yaml` | `time_window_hours: 24` | 当前24小时 |
+| **爬虫抓取频率** | `scraper_config.json` | `interval: 1800` | 当前30分钟(1800秒) |
+| **爬虫抓取数量** | `scraper_config.json` | `limit: 10` | 每次抓取条数 |
+| **本地筛选默认时间** | `frontend/src/pages/Dashboard.jsx` | 搜索`timeRange: '6'` (Tab 1) | 当前6小时 |
+| **AI筛选默认时间** | `frontend/src/pages/Dashboard.jsx` | 搜索`aiTimeRange: '8'` (Tab 8) | 当前8小时 |
+| **新闻输出默认评分** | `frontend/src/pages/Dashboard.jsx` | 搜索`minScore: 6` (Tab 7) | 当前≥6分 |
+| **DeepSeek API配置** | `.env` | `DEEPSEEK_API_KEY` | API密钥 |
+| **Telegram配置** | `.env` | `TELEGRAM_BOT_TOKEN` | Bot Token |
+
+### 功能模块定位
+
+| 需求 | 核心文件 | 说明 |
+|-----|---------|------|
+| **新增爬虫平台** | `crawler/scrapers/` | 继承`BaseScraper`类 |
+| **修改去重算法** | `crawler/filters/local_deduplicator.py` | 使用difflib.SequenceMatcher |
+| **调整AI提示词** | `backend/services/deepseek_service.py` | 修改评分逻辑 |
+| **修改前端Tab** | `frontend/src/pages/Dashboard.jsx` | 1866行单页应用 |
+| **添加API端点** | `backend/main.py` | FastAPI路由定义 |
+| **数据库迁移** | `crawler/database/migrations.py` | SQLite迁移脚本 |
+| **修改导出格式** | `frontend/src/pages/Dashboard.jsx` | 搜索`handleCopy`函数 |
+
+### 快速排查问题
+
+| 问题 | 检查位置 | 常见原因 |
+|-----|---------|---------|
+| **爬虫不抓取** | `scraper_config.json` | interval设置过大 |
+| **去重过多** | `crawler/config/filters.yaml` | threshold阈值过低 |
+| **AI不返回** | `.env` | API_KEY未配置或余额不足 |
+| **前端显示异常** | `frontend/src/api.js` | API地址错误(默认8000端口) |
+| **数据库锁定** | `ainews.db` | WAL模式并发冲突 |
+
+### 性能优化点
+
+| 优化项 | 修改位置 | 建议值 |
+|-------|---------|--------|
+| **降低爬虫频率** | `scraper_config.json` | interval改为3600(1小时) |
+| **减少单次抓取量** | `scraper_config.json` | limit改为5-8 |
+| **缩短时间窗口** | `crawler/config/filters.yaml` | time_window_hours改为12 |
+| **提高去重阈值** | `crawler/config/filters.yaml` | threshold改为0.60-0.70 |
+
+---
+
+## ⚠️ 文档更新规范
+
+> **重要提醒**: 本文档是项目的唯一真实来源(Single Source of Truth)
+
+**更新要求**:
+- ✅ **任何代码修改都必须同步更新此文档**
+- ✅ **参数调整**: 更新"常见修改场景快速指南"中的对应值
+- ✅ **新增功能**: 更新"核心功能模块"和"API接口文档"
+- ✅ **文件变动**: 更新"目录结构详解"
+- ✅ **配置修改**: 更新"配置说明"章节
+- ✅ **数据库变更**: 更新"数据库设计"和"数据流程"
+
+**更新时机**:
+1. 修改代码后立即更新文档
+2. 每次Git提交前检查文档一致性
+3. 重大更新后修改文档顶部的"最后更新"日期
+
+---
+
+*文档创建于 2025-12-26，基于项目当前状态*  
+*最后更新: 2025-12-26 - 新增"常见修改场景快速指南"章节，增强新闻输出功能（内容展开+完整复制），修复所有爬虫时间解析bug，AI tab添加级联删除功能*

@@ -101,7 +101,17 @@ class ForesightScraper(BaseScraper):
                             minute = int(time_match.group(2))
                             
                             now = datetime.now()
-                            published_at = now.replace(month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+                            
+                            # 构造完整的datetime对象（避免使用replace导致的跨年问题）
+                            try:
+                                published_at = datetime(now.year, month, day, hour, minute, 0)
+                            except ValueError:
+                                # 日期无效（如2月30日），使用当前时间
+                                published_at = now
+                            else:
+                                # 如果时间在未来（跨年情况），使用去年
+                                if published_at > now:
+                                    published_at = published_at.replace(year=now.year - 1)
                 except Exception as e:
                     print(f"  时间提取失败: {e}")
                 
