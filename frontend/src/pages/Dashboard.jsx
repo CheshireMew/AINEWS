@@ -356,7 +356,7 @@ const Dashboard = () => {
     const [newKeyword, setNewKeyword] = useState('');
     const [newMatchType, setNewMatchType] = useState('contains');
     const [filtering, setFiltering] = useState(false);
-    const [filterTimeRange, setFilterTimeRange] = useState(24);
+    const [filterTimeRange, setFilterTimeRange] = useState(6); // Default 6 hours
 
     // Filtered News View
     const [filteredNews, setFilteredNews] = useState([]);
