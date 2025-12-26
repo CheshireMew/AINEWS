@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager
 # if sys.platform == 'win32':
 #     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse # Added for export
+from fastapi.responses import StreamingResponse, JSONResponse  # Added for export
 from pydantic import BaseModel
 from logging import getLogger
 
@@ -26,6 +26,16 @@ from database.db_sqlite import Database
 # Add backend directory to path for service imports
 sys.path.append(str(Path(__file__).parent))
 from services.llm import DeepSeekService
+
+# Import Core modules
+from core.response import APIResponse
+from core.exceptions import (
+    APIException, 
+    ValidationError, 
+    NotFoundError,
+    DatabaseError,
+    BusinessError
+)
 
 # Import Scrapers
 from scrapers.techflow import TechFlowScraper
@@ -47,6 +57,35 @@ SCRAPER_MAP = {
 }
 
 app = FastAPI(title="AINews Admin API")
+
+# 全局异常处理器
+@app.exception_handler(APIException)
+async def api_exception_handler(request: Request, exc: APIException):
+    """处理API自定义异常"""
+    return JSONResponse(
+        status_code=exc.code,
+        content=APIResponse.error(
+            message=exc.message,
+            code=exc.code,
+            error_type=exc.error_type,
+            details=getattr(exc, 'details', None)
+        )
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """处理未捕获的异常"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content=APIResponse.error(
+            message="服务器内部错误",
+            code=500,
+            error_type="InternalServerError",
+            details=str(exc) if logger.level <= 10 else None  # DEBUG模式才显示详情
+        )
+    )
+
 
 # ... (CORS and DB init remain same)
 
@@ -422,120 +461,124 @@ def read_root():
 @app.get("/api/stats")
 def get_stats():
     """Get crawling stats for today"""
-    conn = db.connect()
-    cursor = conn.cursor()
-    # Count news per source for today (scraped_at like 'YYYY-MM-DD%')
-    # Using 'now' logic from db_sqlite is complex, simpler validation:
-    # Just group by source_site overall for now
-    cursor.execute("SELECT source_site, count(*) as count FROM news GROUP BY source_site")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    return {
-        "stats": [{"source": row['source_site'], "count": row['count']} for row in rows]
-    }
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT source_site, count(*) as count FROM news GROUP BY source_site")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        stats = [{"source": row['source_site'], "count": row['count']} for row in rows]
+        return APIResponse.success(data={"stats": stats}, message="统计查询成功")
+    except Exception as e:
+        raise DatabaseError(f"查询统计失败: {str(e)}")
 
 @app.get("/api/news")
 def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None):
     """Get news list with pagination"""
-    conn = db.connect()
-    cursor = conn.cursor()
-    offset = (page - 1) * limit
-    
-    query = "SELECT * FROM news WHERE 1=1"
-    params = []
-    
-    if source:
-        query += " AND source_site = ?"
-        params.append(source)
-    
-    if stage:
-        query += " AND stage = ?"
-        params.append(stage)
-    
-    query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    
-    # Get total count
-    count_query = "SELECT count(*) FROM news WHERE 1=1"
-    count_params = []
-    if source:
-        count_query += " AND source_site = ?"
-        count_params.append(source)
-    if stage:
-        count_query += " AND stage = ?"
-        count_params.append(stage)
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        offset = (page - 1) * limit
         
-    cursor.execute(count_query, count_params)
-    total = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {
-        "data": [dict(row) for row in rows],
-        "total": total,
-        "page": page,
-        "limit": limit
-    }
+        query = "SELECT * FROM news WHERE 1=1"
+        params = []
+        
+        if source:
+            query += " AND source_site = ?"
+            params.append(source)
+        
+        if stage:
+            query += " AND stage = ?"
+            params.append(stage)
+        
+        query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        # Get total count
+        count_query = "SELECT count(*) FROM news WHERE 1=1"
+        count_params = []
+        if source:
+            count_query += " AND source_site = ?"
+            count_params.append(source)
+        if stage:
+            count_query += " AND stage = ?"
+            count_params.append(stage)
+            
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return APIResponse.paginated(
+            data=[dict(row) for row in rows],
+            total=total,
+            page=page,
+            limit=limit
+        )
+    except Exception as e:
+        raise DatabaseError(f"查询新闻失败: {str(e)}")
 
 @app.delete("/api/news/{news_id}")
 def delete_news(news_id: int):
     """Delete a news item"""
-    conn = db.connect() # Or better, use db.delete_news but db instance here is 'Database' class not instance? 
-    # Wait, 'db' in main.py is initialized as 'db = Database()'.
-    # db_sqlite methods like 'connect' are instance methods.
-    # So we can use db.delete_news(news_id).
-    # But wait, db instance logic in main.py:
-    # `db = Database()` at line 155.
     success = db.delete_news(news_id)
     if success:
-        return {"status": "success"}
-    raise HTTPException(status_code=500, detail="删除失败")
+        return APIResponse.success(message="删除成功")
+    raise NotFoundError("新闻不存在或删除失败")
 
 @app.get("/api/deduplicated/news")
 def get_deduplicated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None):
     """获取已去重的数据"""
-    return db.get_deduplicated_news(page, limit, source)
+    result = db.get_deduplicated_news(page, limit, source)
+    return APIResponse.paginated(
+        data=result['data'],
+        total=result['total'],
+        page=result['page'],
+        limit=result['limit']
+    )
 
 @app.get("/api/deduplicated/stats")
 def get_deduplicated_stats():
     """获取已去重数据的统计"""
-    db = Database()
-    return db.get_deduplicated_stats()
+    stats = db.get_deduplicated_stats()
+    return APIResponse.success(data=stats, message="统计查询成功")
 
 @app.delete("/api/deduplicated/news/{news_id}")
 def delete_deduplicated_news(news_id: int):
     """删除已去重数据"""
-    db = Database()
     success = db.delete_deduplicated_news(news_id)
     if success:
-        return {"status": "success", "message": "删除成功"}
-    else:
-        raise HTTPException(status_code=404, detail="数据不存在或删除失败")
+        return APIResponse.success(message="删除成功")
+    raise NotFoundError("数据不存在或删除失败")
 
 @app.get("/api/curated/news")
 def get_curated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None):
     """获取精选数据"""
-    return db.get_curated_news(page, limit, source)
+    result = db.get_curated_news(page, limit, source)
+    return APIResponse.paginated(
+        data=result['data'],
+        total=result['total'],
+        page=result['page'],
+        limit=result['limit']
+    )
 
 @app.get("/api/curated/stats")
 def get_curated_stats_api():
     """获取精选数据统计"""
-    db = Database()
-    return db.get_curated_stats()
+    stats = db.get_curated_stats()
+    return APIResponse.success(data=stats, message="统计查询成功")
 
 @app.delete("/api/curated/news/{news_id}")
 def delete_curated_news(news_id: int):
     """删除精选数据"""
-    db = Database()
     success = db.delete_curated_news(news_id)
     if success:
-        return {"status": "success", "message": "删除成功"}
-    else:
-        raise HTTPException(status_code=404, detail="数据不存在或删除失败")
+        return APIResponse.success(message="删除成功")
+    raise NotFoundError("数据不存在或删除失败")
 
 class RestoreRequest(BaseModel):
     source_table: str = 'deduplicated_news'
@@ -543,12 +586,10 @@ class RestoreRequest(BaseModel):
 @app.post("/api/news/restore/{news_id}")
 def restore_news_api(news_id: int, req: RestoreRequest):
     """还原被过滤的新闻"""
-    db = Database()
     success = db.restore_news(news_id, req.source_table)
     if success:
-        return {"status": "success", "message": "还原成功"}
-    else:
-        raise HTTPException(status_code=400, detail="还原失败")
+        return APIResponse.success(message="还原成功")
+    raise BusinessError("还原失败")
 
 # AI Filtering Endpoints
 
@@ -563,20 +604,20 @@ class AIConfig(BaseModel):
 @app.get("/api/ai/config")
 def get_ai_config():
     """获取AI配置"""
-    db = Database()
     prompt = db.get_config("ai_filter_prompt") or ""
     hours = db.get_config("ai_filter_hours")
-    return {"prompt": prompt, "hours": int(hours) if hours else 8}
+    return APIResponse.success(
+        data={"prompt": prompt, "hours": int(hours) if hours else 8}
+    )
 
 @app.post("/api/ai/config")
 def set_ai_config(config: AIConfig):
     """设置AI配置"""
-    db = Database()
     if config.prompt is not None:
         db.set_config("ai_filter_prompt", config.prompt)
     if config.hours is not None:
         db.set_config("ai_filter_hours", str(config.hours))
-    return {"status": "success", "message": "配置已保存"}
+    return APIResponse.success(message="配置已保存")
 
 
 @app.post("/api/curated/ai_filter")
@@ -591,7 +632,7 @@ async def ai_filter_curated(req: AIFilterRequest):
     model = db.get_config("llm_model") or "deepseek-chat"
     
     if not api_key:
-        raise HTTPException(status_code=400, detail="请先配置 DeepSeek API Key")
+        raise ValidationError("请先配置 DeepSeek API Key")
     
     # 获取指定时间范围内未处理或通过的精选数据
     # 支持分页处理以优化速度
@@ -610,7 +651,10 @@ async def ai_filter_curated(req: AIFilterRequest):
     
     if total_count == 0:
         conn.close()
-        return {"status": "success", "message": "没有待筛选的数据", "processed": 0, "total": 0}
+        return APIResponse.success(
+            data={"processed": 0, "total": 0},
+            message="没有待筛选的数据"
+        )
     
     # 获取当前批次的数据（默认每批 20 条，避免 JSON 过长被截断）
     batch_size = getattr(req, 'batch_size', 20)
@@ -624,7 +668,10 @@ async def ai_filter_curated(req: AIFilterRequest):
     conn.close()
     
     if not rows:
-        return {"status": "success", "message": "当前批次没有数据", "processed": 0, "total": total_count, "offset": offset}
+        return APIResponse.success(
+            data={"processed": 0, "total": total_count, "offset": offset},
+            message="当前批次没有数据"
+        )
     
     news_items = [{"id": row["id"], "title": row["title"]} for row in rows]
     
@@ -692,20 +739,22 @@ async def ai_filter_curated(req: AIFilterRequest):
         conn.commit()
         conn.close()
         
-        return {
-            "status": "success", 
-            "message": f"筛选完成: 处理 {updated_count} 条, 拒绝 {filtered_count} 条",
-            "processed": updated_count,
-            "filtered": filtered_count,
-            "total": total_count,
-            "offset": offset,
-            "has_more": (offset + batch_size) < total_count
-        }
+        
+        return APIResponse.success(
+            data={
+                "processed": updated_count,
+                "filtered": filtered_count,
+                "total": total_count,
+                "offset": offset,
+                "has_more": (offset + batch_size) < total_count
+            },
+            message=f"筛选完成: 处理 {updated_count} 条, 拒绝 {filtered_count} 条"
+        )
 
         
     except Exception as e:
         logger.error(f"AI筛选失败: {e}")
-        raise HTTPException(status_code=500, detail=f"AI筛选失败: {str(e)}")
+        raise DatabaseError(f"AI筛选失败: {str(e)}")
 
 
 @app.post("/api/curated/batch_restore")
@@ -731,14 +780,13 @@ async def batch_restore_rejected():
         
         conn.close()
         
-        return {
-            "status": "success",
-            "message": f"成功还原 {rejected_count} 条数据",
-            "restored_count": rejected_count
-        }
+        return APIResponse.success(
+            data={"restored_count": rejected_count},
+            message=f"成功还原 {rejected_count} 条数据"
+        )
     except Exception as e:
         logger.error(f"批量还原失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量还原失败: {str(e)}")
+        raise DatabaseError(f"批量还原失败: {str(e)}")
 
 
 @app.post("/api/curated/clear_all_ai_status")
@@ -764,14 +812,14 @@ async def clear_all_ai_status():
         
         conn.close()
         
-        return {
-            "status": "success",
-            "message": f"成功清空 {total_count} 条数据的 AI 筛选状态",
-            "cleared_count": total_count
-        }
+        
+        return APIResponse.success(
+            data={"cleared_count": total_count},
+            message=f"成功清空 {total_count} 条数据的 AI 筛选状态"
+        )
     except Exception as e:
         logger.error(f"清空失败: {e}")
-        raise HTTPException(status_code=500, detail=f"清空失败: {str(e)}")
+        raise DatabaseError(f"清空失败: {str(e)}")
 
 
 @app.get("/api/curated/export")
@@ -833,15 +881,13 @@ async def get_export_news(hours: int = 24, min_score: int = 6):
         # 按评分从高到低排序
         filtered_news.sort(key=lambda x: x['score'], reverse=True)
         
-        return {
-            "status": "success",
-            "news": filtered_news,
-            "total": len(filtered_news)
-        }
+        return APIResponse.success(
+            data={"news": filtered_news, "total": len(filtered_news)}
+        )
         
     except Exception as e:
         logger.error(f"获取导出新闻失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取导出新闻失败: {str(e)}")
+        raise DatabaseError(f"获取导出新闻失败: {str(e)}")
 
 
 @app.post("/api/curated/restore/{news_id}")
@@ -857,7 +903,7 @@ def restore_curated_news_api(news_id: int):
     cursor.execute("UPDATE curated_news SET ai_status = 'restored' WHERE id = ?", (news_id,))
     conn.commit()
     conn.close()
-    return {"status": "success", "message": "已还原"}
+    return APIResponse.success(message="已还原")
 
 
 @app.get("/api/curated/filtered")
@@ -865,21 +911,30 @@ def get_filtered_curated(status: str, page: int = 1, limit: int = 50):
     """获取筛选后的精选数据 (approved 或 rejected)"""
     db = Database()
     if status not in ['approved', 'rejected']:
-        raise HTTPException(status_code=400, detail="status 必须是 'approved' 或 'rejected'")
-    return db.get_filtered_curated_news(status, page, limit)
+        raise ValidationError("status 必须是 'approved' 或 'rejected'")
+    result = db.get_filtered_curated_news(status, page, limit)
+    return APIResponse.paginated(
+        data=result['data'],
+        total=result['total'],
+        page=result['page'],
+        limit=result['limit']
+    )
 
 @app.get("/api/filtered/dedup/news")
 def get_filtered_dedup_news_api(page: int = 1, limit: int = 50):
-    """获取去重库中的已过滤数据"""
-    return db.get_filtered_dedup_news(page, limit)
+    result = db.get_filtered_dedup_news(page, limit)
+    return APIResponse.paginated(
+        data=result['data'],
+        total=result['total'],
+        page=result['page'],
+        limit=result['limit']
+    )
 
 # --- Blacklist APIs ---
 
 @app.get("/api/blacklist")
 def get_blacklist():
-    """获取所有黑名单关键词"""
-    db = Database()
-    return {"keywords": db.get_blacklist_keywords()}
+    return APIResponse.success(data={"keywords": db.get_blacklist_keywords()})
 
 class AddBlacklistRequest(BaseModel):
     keyword: str
@@ -891,19 +946,16 @@ def add_blacklist(req: AddBlacklistRequest):
     db = Database()
     success = db.add_blacklist_keyword(req.keyword, req.match_type)
     if success:
-        return {"status": "success", "message": "添加成功"}
-    else:
-        raise HTTPException(status_code=400, detail="添加失败，可能关键词已存在")
+        return APIResponse.success(message="添加成功")
+    raise BusinessError("添加失败，可能关键词已存在")
 
 @app.delete("/api/blacklist/{id}")
 def delete_blacklist(id: int):
     """删除黑名单关键词"""
-    db = Database()
     success = db.remove_blacklist_keyword(id)
     if success:
-        return {"status": "success", "message": "删除成功"}
-    else:
-        raise HTTPException(status_code=404, detail="删除失败")
+        return APIResponse.success(message="删除成功")
+    raise NotFoundError("删除失败")
 
 class FilterRequest(BaseModel):
     time_range_hours: int = 24
@@ -911,9 +963,8 @@ class FilterRequest(BaseModel):
 @app.post("/api/news/filter")
 def filter_news(req: FilterRequest):
     """根据黑名单执行过滤"""
-    db = Database()
     result = db.filter_news_by_blacklist(req.time_range_hours)
-    return {"status": "success", "stats": result}
+    return APIResponse.success(data={"stats": result})
 
 class LoginRequest(BaseModel):
     password: str
@@ -922,8 +973,8 @@ class LoginRequest(BaseModel):
 def login(req: LoginRequest):
     # Simple password check
     if req.password == "admin123": # Default password
-        return {"token": "valid-session", "message": "Login successful"}
-    raise HTTPException(status_code=401, detail="Invalid password")
+        return APIResponse.success(data={"token": "valid-session"}, message="Login successful")
+    raise AuthenticationError("Invalid password")
 
 # --- Telegram Endpoints ---
 class TelegramConfig(BaseModel):
@@ -933,22 +984,20 @@ class TelegramConfig(BaseModel):
 
 @app.get("/api/telegram/config")
 def get_telegram_config_api():
-    """Get Telegram configuration"""
-    db = Database()
-    return {
+    """获取Telegram配置"""
+    return APIResponse.success(data={
         "bot_token": db.get_config("telegram_bot_token") or "",
         "chat_id": db.get_config("telegram_chat_id") or "",
         "enabled": db.get_config("telegram_enabled") == "true"
-    }
+    })
 
 @app.post("/api/telegram/config")
 def set_telegram_config_api(config: TelegramConfig):
-    """Set Telegram configuration"""
-    db = Database()
+    """设置Telegram配置"""
     db.set_config("telegram_bot_token", config.bot_token)
     db.set_config("telegram_chat_id", config.chat_id)
     db.set_config("telegram_enabled", "true" if config.enabled else "false")
-    return {"status": "success"}
+    return APIResponse.success(message="配置已保存")
 
 @app.post("/api/telegram/test")
 async def test_telegram_push():
@@ -958,7 +1007,7 @@ async def test_telegram_push():
     chat_id = db.get_config("telegram_chat_id")
     
     if not token or not chat_id:
-        raise HTTPException(status_code=400, detail="请先配置 Telegram Bot Token 和 Chat ID")
+        raise ValidationError("请先配置 Telegram Bot Token 和 Chat ID")
         
     import httpx
     try:
@@ -976,9 +1025,9 @@ async def test_telegram_push():
             if not data.get("ok"):
                 raise Exception(data.get("description", "Unknown error"))
     except Exception as e:
-         raise HTTPException(status_code=400, detail=f"发送失败: {str(e)}")
+        raise BusinessError(f"发送失败: {str(e)}")
             
-    return {"status": "success"}
+    return APIResponse.success(message="测试消息发送成功")
 
 
 
@@ -990,22 +1039,20 @@ class DeepSeekConfig(BaseModel):
 
 @app.get("/api/deepseek/config")
 def get_deepseek_config_api():
-    """Get DeepSeek configuration"""
-    db = Database()
-    return {
+    """获取DeepSeek配置"""
+    return APIResponse.success(data={
         "api_key": db.get_config("llm_api_key") or "",
         "base_url": db.get_config("llm_base_url") or "https://api.deepseek.com",
         "model": db.get_config("llm_model") or "deepseek-chat"
-    }
+    })
 
 @app.post("/api/deepseek/config")
 def set_deepseek_config_api(config: DeepSeekConfig):
-    """Set DeepSeek configuration"""
-    db = Database()
+    """设置DeepSeek配置"""
     db.set_config("llm_api_key", config.api_key)
     db.set_config("llm_base_url", config.base_url)
     db.set_config("llm_model", config.model)
-    return {"status": "success"}
+    return APIResponse.success(message="配置已保存")
 
 @app.post("/api/deepseek/test")
 async def test_deepseek_connection_api():
@@ -1016,16 +1063,18 @@ async def test_deepseek_connection_api():
     model = db.get_config("llm_model") or "deepseek-chat"
     
     if not api_key:
-        raise HTTPException(status_code=400, detail="请先配置 API Key")
+        raise ValidationError("请先配置 API Key")
         
     try:
         service = DeepSeekService(api_key, base_url, model)
         result = await service.test_connection()
         if not result["ok"]:
-             raise HTTPException(status_code=400, detail=f"连接失败: {result.get('error')}")
-        return result
+            raise BusinessError(f"连接失败: {result.get('error')}")
+        return APIResponse.success(data=result)
+    except APIException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise DatabaseError(str(e))
 
 @app.get("/api/export")
 def export_news(

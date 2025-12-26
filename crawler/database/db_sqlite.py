@@ -3,6 +3,14 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 from pathlib import Path
+import sys
+
+# 添加backend路径以导入core模块
+backend_path = Path(__file__).parent.parent.parent / 'backend'
+sys.path.insert(0, str(backend_path))
+
+from core.db_base import DatabaseBase
+
 # 北京时区 (UTC+8)
 BEIJING_TZ = timezone(timedelta(hours=8))
 def get_beijing_time():
@@ -22,7 +30,8 @@ def format_beijing_time(dt):
         # 转换为北京时间
         dt = dt.astimezone(BEIJING_TZ)
     return dt.strftime('%Y-%m-%d %H:%M:%S')
-class Database:
+
+class Database(DatabaseBase):
     def __init__(self, db_path: str = None):
         """初始化SQLite数据库连接"""
         if db_path is None:
@@ -573,29 +582,21 @@ class Database:
             return archived_count
         except:
             return 0
-    
+        
     def get_deduplicated_news(self, page=1, limit=50, source=None):
-        """分页查询deduplicated_news表"""
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            where_clause = ""
-            params = []
-            if source:
-                where_clause = "WHERE source_site = ?"
-                params.append(source)
-            offset = (page - 1) * limit
-            query = f'SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type FROM deduplicated_news {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?'
-            params.extend([limit, offset])
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            count_query = f'SELECT COUNT(*) FROM deduplicated_news {where_clause}'
-            cursor.execute(count_query, params[:-2] if where_clause else [])
-            total = cursor.fetchone()[0]
-            conn.close()
-            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
-        except:
-            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
+        """分页查询deduplicated_news表 - 已重构"""
+        where = "source_site = ?" if source else "1=1"
+        params = (source,) if source else ()
+        
+        return self.paginated_query(
+            table='deduplicated_news',
+            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type',
+            where=where,
+            where_params=params,
+            order_by='published_at DESC',
+            page=page,
+            limit=limit
+        )
     
     
     def get_deduplicated_stats(self):
@@ -902,50 +903,36 @@ class Database:
             return []
 
     def get_curated_news(self, page=1, limit=50, source=None):
-        """分页查询 curated_news 表 (精选数据)"""
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            where_clause = ""
-            params = []
-            if source:
-                where_clause = "WHERE source_site = ?"
-                params.append(source)
-            offset = (page - 1) * limit
-            query = f'SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type FROM curated_news {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?'
-            params.extend([limit, offset])
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            count_query = f'SELECT COUNT(*) FROM curated_news {where_clause}'
-            cursor.execute(count_query, params[:-2] if where_clause else [])
-            total = cursor.fetchone()[0]
-            conn.close()
-            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
-        except Exception as e:
-            print(f"Get Curated News Error: {e}")
-            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
+        """分页查询 curated_news 表 (精选数据) - 已重构使用基类"""
+        # 构建WHERE条件
+        where = "source_site = ?" if source else "1=1"
+        params = (source,) if source else ()
+        
+        # 使用基类的paginated_query方法
+        return self.paginated_query(
+            table='curated_news',
+            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type',
+            where=where,
+            where_params=params,
+            order_by='published_at DESC',
+            page=page,
+            limit=limit
+        )
     
     def get_filtered_curated_news(self, ai_status, page=1, limit=50):
-        """获取经过AI筛选的精选数据 (approved 或 rejected)"""
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            offset = (page - 1) * limit
-            query = '''SELECT id, title, content, source_site, source_url, published_at, scraped_at, 
-                       deduplicated_at, curated_at, is_marked_important, site_importance_flag, 
-                       stage, type, ai_status, ai_summary 
-                       FROM curated_news 
-                       WHERE ai_status = ? 
-                       ORDER BY published_at DESC LIMIT ? OFFSET ?'''
-            cursor.execute(query, (ai_status, limit, offset))
-            rows = cursor.fetchall()
-            cursor.execute('SELECT COUNT(*) FROM curated_news WHERE ai_status = ?', (ai_status,))
-            total = cursor.fetchone()[0]
-            conn.close()
-            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
-        except Exception as e:
-            print(f"Get Filtered Curated News Error: {e}")
-            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
+        """获取经过AI筛选的精选数据 - 已重构"""
+        where = "ai_status = ?"
+        params = (ai_status,)
+        
+        return self.paginated_query(
+            table='curated_news',
+            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type, ai_status, ai_summary',
+            where=where,
+            where_params=params,
+            order_by='published_at DESC',
+            page=page,
+            limit=limit
+        )
 
     def get_curated_stats(self):
         """获取精选数据统计"""
@@ -1047,55 +1034,31 @@ class Database:
             return []
 
     def get_filtered_dedup_news(self, page=1, limit=50):
-        """分页查询 deduplicated_news 表中被过滤的项目 (stage='filtered')"""
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            offset = (page - 1) * limit
-            query = f"SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, stage, type FROM deduplicated_news WHERE stage = 'filtered' ORDER BY published_at DESC LIMIT ? OFFSET ?"
-            params = [limit, offset]
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            count_query = "SELECT COUNT(*) FROM deduplicated_news WHERE stage = 'filtered'"
-            cursor.execute(count_query)
-            total = cursor.fetchone()[0]
-            conn.close()
-            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
-        except Exception as e:
-            print(f"Get Filtered Dedup News Error: {e}")
-            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
-
-    def get_filtered_curated_news(self, status: str, page: int = 1, limit: int = 50):
-        """获取AI筛选后的精选数据 (approved, rejected, or restored)"""
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            offset = (page - 1) * limit
-            
-            where_clause = "ai_status = ?"
-            params = [status]
-            
-            # 特殊处理: 如果查询 'approved'，也包含 'restored'
-            if status == 'approved':
-                where_clause = "(ai_status = 'approved' OR ai_status = 'restored')"
-                params = []
-            
-            query = f"SELECT * FROM curated_news WHERE {where_clause} ORDER BY published_at DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
-            
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            
-            count_query = f"SELECT COUNT(*) FROM curated_news WHERE {where_clause}"
-            cursor.execute(count_query, params[:-2])
-            total = cursor.fetchone()[0]
-            
-            conn.close()
-            return {'data': [dict(row) for row in rows], 'total': total, 'page': page, 'limit': limit}
-        except Exception as e:
-            print(f"Get Filtered Curated Error: {e}")
-            return {'data': [], 'total': 0, 'page': page, 'limit': limit}
-
+        """获取去重库中的已过滤数据 - 已重构"""
+        where = "stage = 'filtered'"
+        
+        return self.paginated_query(
+            table='deduplicated_news',
+            where=where,
+            where_params=(),
+            order_by='published_at DESC',
+            page=page,
+            limit=limit
+        )
+        
+    def get_filtered_curated_news(self, ai_status, page=1, limit=50):
+        """获取AI筛选后的精选数据 - 已重构"""
+        where = "ai_status = ?"
+        params = (ai_status,)
+        
+        return self.paginated_query(
+            table='curated_news',
+            where=where,
+            where_params=params,
+            order_by='published_at DESC',
+            page=page,
+            limit=limit
+        )
     # --- System Config Methods ---
     def get_config(self, key: str) -> Optional[str]:
         """获取系统配置"""

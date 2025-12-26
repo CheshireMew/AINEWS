@@ -13,8 +13,66 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
+// Add a response interceptor to handle the new API format
+api.interceptors.response.use(
+    (response) => {
+        // 新的API格式: { success: true, data: {...}, message: "...", pagination: {...} }
+        // 为了向后兼容，我们需要处理新旧两种格式
+
+        const data = response.data;
+
+        // 检查是否是新格式（有success字段）
+        if (data && typeof data.success !== 'undefined') {
+            // 新格式：提取data，并保留pagination等其他字段
+            // 将response.data替换为实际数据，但保留其他元数据
+            if (data.pagination) {
+                // 分页响应：将data和pagination都保留
+                return {
+                    ...response,
+                    data: {
+                        data: data.data,
+                        total: data.pagination.total,
+                        page: data.pagination.page,
+                        limit: data.pagination.limit,
+                        pages: data.pagination.pages
+                    }
+                };
+            } else {
+                // 普通响应：直接返回data
+                return {
+                    ...response,
+                    data: data.data || data
+                };
+            }
+        }
+
+        // 旧格式：直接返回
+        return response;
+    },
+    (error) => {
+        // 处理错误响应
+        if (error.response && error.response.data) {
+            const errorData = error.response.data;
+
+            // 新格式的错误: { success: false, message: "...", error: {...} }
+            if (errorData.success === false) {
+                // 使用自定义消息
+                const customError = new Error(errorData.message || '请求失败');
+                customError.response = error.response;
+                customError.errorType = errorData.error?.type;
+                customError.errorDetails = errorData.error?.details;
+                throw customError;
+            }
+        }
+
+        // 默认错误处理
+        throw error;
+    }
+);
+
 export const login = async (password) => {
     const res = await api.post('/login', { password });
+    // 响应拦截器已处理，res.data就是实际数据
     if (res.data.token) {
         localStorage.setItem('token', res.data.token);
     }
