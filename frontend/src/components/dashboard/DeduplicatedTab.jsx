@@ -5,6 +5,7 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { getDeduplicatedNews, restoreNews, deduplicateNews, deleteDeduplicatedNews, batchRestoreDeduplicated } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
+import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
 
@@ -19,6 +20,27 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     const [dedupPagination, setDedupPagination] = useState({ current: 1, pageSize: 10, total: 0 });
     const [dedupFilterSource, setDedupFilterSource] = useState(undefined);
     const [filterKeyword, setFilterKeyword] = useState('');
+
+    // Deduplication controls
+    const [dedupTimeRange, setDedupTimeRange] = useState(8);
+    const [deduplicating, setDeduplicating] = useState(false);
+
+    /**
+     * 手动去重
+     */
+    const handleDeduplicate = async () => {
+        setDeduplicating(true);
+        try {
+            const res = await deduplicateNews(dedupTimeRange, 'mark');
+            message.success(`去重完成！标记了 ${res.data.stats.duplicates_processed} 条重复新闻, 归档了 ${res.data.stats.archived_count} 条`);
+            // 去重会移动数据到本表，刷新列表
+            fetchDedupNews(1, dedupFilterSource);
+        } catch (e) {
+            message.error('去重失败: ' + (e.response?.data?.detail || e.message));
+        } finally {
+            setDeduplicating(false);
+        }
+    };
 
 
     /**
@@ -164,6 +186,18 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
                 onRefresh={() => fetchDedupNews(dedupPagination.current, dedupFilterSource, filterKeyword)}
                 loading={loadingDedup}
             >
+                <Space>
+                    <span>去重范围:</span>
+                    <TimeRangeSelect value={dedupTimeRange} onChange={setDedupTimeRange} />
+                    <Button
+                        type="primary"
+                        onClick={handleDeduplicate}
+                        loading={deduplicating}
+                    >
+                        手动去重
+                    </Button>
+                </Space>
+                <div style={{ borderLeft: '1px solid #d9d9d9', height: 24, margin: '0 8px', display: 'inline-block', verticalAlign: 'middle' }} />
                 <Popconfirm
                     title="还原已去重数据"
                     description="确定要还原所有已处理的去重数据吗？这将把数据还原到 news 表的 'raw' 状态，并删除去重记录和精选记录。"

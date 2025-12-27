@@ -13,7 +13,7 @@ const { Option } = Select;
  * 精选数据Tab组件
  * 用于管理人工精选的新闻数据
  */
-const CuratedNewsTab = ({ spiders, onAddToFeatured, onShowExport }) => {
+const CuratedNewsTab = ({ spiders, onAddToFeatured, onShowExport, active }) => {
     // 状态管理
     const [curatedNews, setCuratedNews] = useState([]);
     const [loadingCurated, setLoadingCurated] = useState(false);
@@ -58,6 +58,13 @@ const CuratedNewsTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     useEffect(() => {
         fetchCuratedNews(1, curatedFilterSource);
     }, []);
+
+    // 激活时刷新数据
+    useEffect(() => {
+        if (active) {
+            fetchCuratedNews(curatedPagination.current, curatedFilterSource, filterKeyword);
+        }
+    }, [active]);
 
     // 表格列定义
     const columns = [

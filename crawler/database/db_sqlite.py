@@ -417,16 +417,27 @@ class Database(DatabaseBase):
             
             # 计算时间阈值
             from datetime import datetime, timedelta
-            threshold = datetime.now() - timedelta(hours=hours)
-            threshold_str = threshold.strftime('%Y-%m-%d %H:%M:%S')
             
-            cursor.execute('''
-                SELECT id, title, content, source_site, source_url, published_at, scraped_at,
-                       is_marked_important, site_importance_flag, stage, type
-                FROM news
-                WHERE scraped_at >= ?
-                ORDER BY scraped_at DESC
-            ''', (threshold_str,))
+            # hours=0 表示获取所有新闻
+            if hours == 0:
+                cursor.execute('''
+                    SELECT id, title, content, source_site, source_url, published_at, scraped_at,
+                           is_marked_important, site_importance_flag, stage, type
+                    FROM news
+                    ORDER BY scraped_at DESC
+                ''')
+            else:
+                threshold = datetime.now() - timedelta(hours=hours)
+                threshold_str = threshold.strftime('%Y-%m-%d %H:%M:%S')
+                
+                cursor.execute('''
+                    SELECT id, title, content, source_site, source_url, published_at, scraped_at,
+                           is_marked_important, site_importance_flag, stage, type
+                    FROM news
+                    WHERE scraped_at >= ?
+                    ORDER BY scraped_at DESC
+                ''', (threshold_str,))
+            
             
             rows = cursor.fetchall()
             conn.close()
@@ -461,9 +472,11 @@ class Database(DatabaseBase):
             # 更新stage为duplicate，并记录主新闻ID
             cursor.execute('''
                 UPDATE news
-                SET stage = 'duplicate'
+                SET stage = 'duplicate',
+                    is_duplicate = 1,
+                    duplicate_of = ?
                 WHERE id = ?
-            ''', (news_id,))
+            ''', (master_id, news_id))
             
             conn.commit()
             conn.close()
@@ -671,7 +684,10 @@ class Database(DatabaseBase):
 
             from datetime import datetime, timedelta
             # Fix: Use the same format as DB (space separator), ISO format 'T' causes string comparison mismatches
-            start_time = (datetime.now() - timedelta(hours=time_range_hours)).strftime('%Y-%m-%d %H:%M:%S')
+            if time_range_hours <= 0:
+                start_time = '1970-01-01 00:00:00'
+            else:
+                start_time = (datetime.now() - timedelta(hours=time_range_hours)).strftime('%Y-%m-%d %H:%M:%S')
             
             conn = self.connect()
             cursor = conn.cursor()

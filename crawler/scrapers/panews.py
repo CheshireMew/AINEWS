@@ -134,36 +134,17 @@ class PANewsScraper(BaseScraper):
                 
                 # 8. 获取完整内容
                 content = ''
+                # 8. 获取完整内容
+                content = ''
                 if url:
-                    try:
-                        detail_page = await self.browser.new_page()
-                        await detail_page.goto(url, timeout=15000)
-                        await detail_page.wait_for_timeout(1500)
-                        
-                        # 尝试多个选择器 - PANews使用article.prose
-                        for selector in ['article.prose', 'article', '.article-content', '.content']:
-                            content_el = await detail_page.query_selector(selector)
-                            if content_el:
-                                # 使用 inner_text() 获取纯文本
-                                raw_content = await content_el.inner_text()
-                                raw_content = raw_content.strip()
-                                print(f"  [DEBUG] 使用选择器 '{selector}' 获取到 {len(raw_content)} 字符")
-                                
-                                # 先清理内容
-                                content = self.clean_content(raw_content, title)
-                                print(f"  [DEBUG] 清理后剩余 {len(content)} 字符")
-                                
-                                # 检查清理后的内容长度
-                                if content and len(content) > 20:
-                                    print(f"  [DEBUG] 内容足够，使用此选择器")
-                                    break
-                                # 如果清理后内容太短，尝试下一个选择器
-                                print(f"  [DEBUG] 内容太短，尝试下一个选择器")
-                                content = ''
-                        
-                        await detail_page.close()
-                    except Exception as e:
-                        print(f"  获取详情页失败: {e}")
+                    content = await self.fetch_full_content(
+                        url,
+                        content_selectors=['article.prose', 'article', '.article-content', '.content'],
+                        extract_paragraphs=True
+                    )
+                
+                # 清理内容
+                content = self.clean_content(content, title)
                
                 # Fallback
                 if not content or len(content) < 10:

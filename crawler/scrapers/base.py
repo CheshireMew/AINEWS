@@ -95,43 +95,44 @@ class BaseScraper(ABC):
         except:
             return ""
     
+    
     def clean_content(self, content: str, title: str = "") -> str:
         """
         清理新闻内容，去除固定前缀和重复标题
-        
-        Args:
-            content: 原始内容
-            title: 新闻标题（用于去除内容中的重复标题）
-        
-        Returns:
-            清理后的内容
         """
         import re
         
         if not content:
             return content
         
+        # 0. 预处理：首尾去空
+        content = content.strip()
+        
         # 1. 去除 marsbit 的【标题】格式
         content = re.sub(r'^【[^】]+】', '', content).strip()
         
         # 2. 去除各网站的固定前缀
         prefixes = [
-            r'Odaily\s*星球日报讯[\s，,]*',
-            r'PANews\s+\d+月\d+日消息[\s，,]*',
-            r'ChainCatcher\s*消息[\s，,]*',
-            r'BlockBeats\s*消息[\s，,]*',
-            r'深潮\s*TechFlow\s*消息[\s，,]*',
-            r'Foresight\s*News\s*消息[\s，,]*',
-            r'火星财经消息[\s，,]*',
-            r'MarsBit\s*消息[\s，,]*',
+            r'^Odaily(?:星球日报)?\s*(?:讯|消息|报道)[\s，,]*',
+            r'^PANews(?:\s+\d+月\d+日)?\s*(?:讯|消息|报道)[\s，,]*',
+            r'^ChainCatcher\s*(?:讯|消息|报道)[\s，,]*',
+            r'^BlockBeats\s*(?:讯|消息|报道)[\s，,]*',
+            r'^深潮\s*(?:TechFlow)?\s*(?:讯|消息|报道)[\s，,]*',
+            r'^Foresight(?:\s*News)?\s*(?:讯|消息|报道|快讯)[\s，,]*',
+            r'^火星财经\s*(?:讯|消息|报道)[\s，,]*',
+            r'^MarsBit\s*(?:讯|消息|报道)[\s，,]*',
+            r'^[\s，,]*消息[\s，,]*',
         ]
         
+        original_len = len(content)
         for prefix_pattern in prefixes:
-            content = re.sub(prefix_pattern, '', content, flags=re.IGNORECASE)
+            content = re.sub(prefix_pattern, '', content, count=1, flags=re.IGNORECASE).strip()
         
-        
+        if len(content) < original_len:
+            # print(f"  [DEBUG] Cleared prefix, length delta: {original_len - len(content)}")
+            pass
+            
         # 3. 如果提供了标题，且内容开头包含标题，则去除
-        # 但要确保删除后内容仍然完整（有足够长度且有意义）
         if title and content.startswith(title):
             remaining = content[len(title):].strip()
             # 只在以下情况删除标题：
@@ -145,7 +146,6 @@ class BaseScraper(ABC):
                 elif len(remaining) > 50 and not remaining[0].isalnum():
                     # 剩余内容较长且以非字母数字开头（如标点），可能是分隔
                     content = re.sub(r'^[，,：:、\s]+', '', remaining)
-                # 否则保留完整内容（不删除标题）
         
         return content.strip()
     
@@ -279,35 +279,88 @@ class BaseScraper(ABC):
                 'style_flag': 'unknown'
             }
     
-    async def fetch_full_content(self, detail_url: str, content_selectors: List[str] = None) -> str:
+    async def fetch_full_content(self, detail_url: str, content_selectors: List[str] = None, extract_paragraphs: bool = False) -> str:
         """
         访问新闻详情页，获取完整内容（通用方法）
-        子类可以传入自定义的选择器列表
+        Args:
+            detail_url: 详情页URL
+            content_selectors: 内容区域选择器列表
+            extract_paragraphs: 是否遍历提取 <p> 标签内容并合并 (适用于 Foresight/PANews 等)
         """
         if not content_selectors:
             content_selectors = [
                 '.article-content',
-                '.aritcle_content',
-                '.content',
+                '.art_detail_content', # TechFlow
+                '.rich_text_content', # ChainCatcher
+                '.flash-content', # BlockBeats/MarsBit
+                '.detail-body', # Foresight
+                '.news_body_content',
+                'article.prose', # PANews
                 'article',
-                '.detail-content',
-                '.news-content',
-                '.post-content',
-                '.entry-content'
+                '.content',
             ]
         
         try:
+            print(f"  [DEBUG] Fetching content from: {detail_url}")
             detail_page = await self.browser.new_page()
-            await detail_page.goto(detail_url, timeout=15000)
-            await detail_page.wait_for_timeout(1500)
             
+            # 使用 domcontentloaded 等待，配合重试机制处理SPA动态加载，避免死等 networkidle
+            try:
+                await detail_page.goto(detail_url, wait_until='domcontentloaded', timeout=30000)
+            except Exception as e:
+                print(f"  [DEBUG] Navigation timeout (continuing): {e}")
+
             full_content = ""
-            for selector in content_selectors:
-                content_el = await detail_page.query_selector(selector)
-                if content_el:
-                    full_content = await self.safe_extract_text(content_el)
-                    if full_content and len(full_content) > 50:
-                        break
+            
+            # 增加重试机制 (最多尝试5次，每次间隔1.5秒)
+            for attempt in range(5):
+                try:
+                    for selector in content_selectors:
+                        try:
+                            content_el = await detail_page.query_selector(selector)
+                            if content_el:
+                                if extract_paragraphs:
+                                    # 提取所有 p 和 li 标签
+                                    elements = await content_el.query_selector_all('p, li')
+                                    if elements:
+                                        lines = []
+                                        for el in elements:
+                                            text = await self.safe_extract_text(el)
+                                            if text:
+                                                # 如果是列表项，加个前缀
+                                                tag_name = await el.evaluate('el => el.tagName')
+                                                if tag_name == 'LI':
+                                                    text = f"- {text}"
+                                                lines.append(text)
+                                        full_content = '\n\n'.join(lines)
+                                    else:
+                                        # 如果没有 p 标签，回退到 inner_text
+                                        full_content = await self.safe_extract_text(content_el)
+                                else:
+                                    # 标准模式：直接获取 inner_text
+                                    full_content = await self.safe_extract_text(content_el)
+                                
+                                if full_content and len(full_content) > 20: # 内容检查
+                                    break
+                        except:
+                            continue
+                    
+                    if full_content and len(full_content) > 20:
+                        break # 成功获取
+                        
+                    # 等待加载
+                    await detail_page.wait_for_timeout(1500)
+                    
+                except Exception as e:
+                    print(f"  [Attempt {attempt+1}] 获取内容尝试失败: {e}")
+            
+            # 失败调试
+            if not full_content:
+                print(f"  [WARNING] 无法获取内容: {detail_url}")
+                try:
+                    body = await detail_page.inner_html('body')
+                    print(f"  [DEBUG] Body Preview: {body[:200]}...")
+                except: pass
             
             await detail_page.close()
             return full_content if full_content else ""

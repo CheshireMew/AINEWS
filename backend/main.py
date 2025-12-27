@@ -87,11 +87,97 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ... (CORS and DB init remain same)
+# 初始化数据库
+db = Database()
 
-# ... (Stats and News endpoints remain same)
+# 配置CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有来源
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# ... imports
+# 启动时初始化数据库
+@app.on_event("startup")
+async def startup_event():
+    try:
+        db.init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
+@app.get("/api/stats")
+async def get_stats():
+    """Get scraping statistics"""
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        cursor.execute("SELECT source_site, COUNT(*) as count FROM news GROUP BY source_site")
+        rows = cursor.fetchall()
+        stats = [{"source": row[0], "count": row[1]} for row in rows]
+        conn.close()
+        return APIResponse.success(data={'stats': stats})
+    except Exception as e:
+        logger.error(f"Error getting stats: {e}")
+        return APIResponse.error(message="Failed to get stats")
+
+@app.get("/api/news")
+async def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None, keyword: Optional[str] = None):
+    """Get news list with pagination"""
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        offset = (page - 1) * limit
+        
+        query = "SELECT * FROM news WHERE 1=1"
+        params = []
+        
+        if source:
+            query += " AND source_site = ?"
+            params.append(source)
+        
+        if stage:
+            query += " AND stage = ?"
+            params.append(stage)
+        
+        if keyword:
+            query += " AND (title LIKE ? OR content LIKE ?)"
+            term = f"%{keyword}%"
+            params.append(term)
+            params.append(term)
+        
+        # Count total
+        count_query = "SELECT count(*) FROM (" + query + ")"
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()[0]
+        
+        # Get data
+        query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
+        columns = [description[0] for description in cursor.description]
+        rows = cursor.fetchall()
+        
+        news_items = []
+        for row in rows:
+            news_items.append(dict(zip(columns, row)))
+            
+        conn.close()
+        
+        return APIResponse.paginated(
+            data=news_items,
+            total=total_count,
+            page=page,
+            limit=limit
+        )
+            
+    except Exception as e:
+        logger.error(f"Error getting news: {e}")
+        return APIResponse.error(message=f"Failed to get news: {str(e)}")
+
 
 SCRAPER_STATUS: Dict[str, Dict] = {} 
 RUNNING_TASKS: Dict[str, asyncio.Task] = {} # { "techflow": task_obj }
@@ -295,9 +381,14 @@ async def deduplicate_news(req: DeduplicateRequest):
         db = Database()
         
         # 1. 获取时间范围内的新闻
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始手动去重 ===")
+        print(f"时间窗口: {req.time_window_hours} 小时")
+        
         news_list = db.get_news_by_time_range(req.time_window_hours)
+        print(f"扫描新闻数量: {len(news_list) if news_list else 0}")
         
         if not news_list:
+            print("未找到符合条件的新闻，结束。")
             return {
                 "status": "success",
                 "message": "未找到符合条件的新闻",
@@ -309,11 +400,16 @@ async def deduplicate_news(req: DeduplicateRequest):
             }
         
         # 2. 使用LocalDeduplicator找出重复
+        print("正在调用 LocalDeduplicator (本地去重算法)...")
         dedup = LocalDeduplicator(similarity_threshold=0.50, time_window_hours=req.time_window_hours)
+        
+        # 记录开始前的内存状态或简单日志
         news_list = dedup.mark_duplicates(news_list)
         
         # 3. 统计和处理重复项
         duplicates = [n for n in news_list if n.get('is_local_duplicate', False)]
+        print(f"发现重复项: {len(duplicates)} 条")
+        
         duplicate_groups = {}
         
         for dup in duplicates:
@@ -321,6 +417,9 @@ async def deduplicate_news(req: DeduplicateRequest):
             if master_idx is not None and master_idx < len(news_list):
                 master = news_list[master_idx]
                 master_id = master['id']
+                
+                # print(f"  ❌ 重复: [ID:{dup['id']}] {dup['title'][:30]}...")
+                # print(f"     → 归并到: [ID:{master_id}] {master['title'][:30]}...")
                 
                 if master_id not in duplicate_groups:
                     duplicate_groups[master_id] = {
@@ -345,11 +444,12 @@ async def deduplicate_news(req: DeduplicateRequest):
                     db.delete_news(dup['id'])
         
         # 归档非重复的新闻到deduplicated_news
-        archived_count = 0
+        archived_count = 0  # 初始化为 0
         if news_list:
             unique_ids = [n['id'] for n in news_list if not n.get('is_local_duplicate', False)]
             if unique_ids:
                 archived_count = db.archive_to_deduplicated(unique_ids)
+        
         
         return {
             "status": "success",
@@ -735,7 +835,10 @@ async def ai_filter_curated(req: AIFilterRequest):
     # 获取指定时间范围内未处理或通过的精选数据
     # 支持分页处理以优化速度
     from datetime import datetime, timedelta
-    cutoff_time = (datetime.now() - timedelta(hours=req.hours)).strftime('%Y-%m-%d %H:%M:%S')
+    if req.hours <= 0:
+        cutoff_time = '1970-01-01 00:00:00'
+    else:
+        cutoff_time = (datetime.now() - timedelta(hours=req.hours)).strftime('%Y-%m-%d %H:%M:%S')
     print(f"[DEBUG] AI Filter: Hours={req.hours}, Cutoff={cutoff_time}")
     
     conn = db.connect()
@@ -743,7 +846,7 @@ async def ai_filter_curated(req: AIFilterRequest):
     
     # 首先获取总数 - 只处理未筛选的数据(pending或NULL)
     cursor.execute(
-        "SELECT COUNT(*) FROM curated_news WHERE curated_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')",
+        "SELECT COUNT(*) FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')",
         (cutoff_time,)
     )
     total_count = cursor.fetchone()[0]
@@ -761,7 +864,7 @@ async def ai_filter_curated(req: AIFilterRequest):
     offset = getattr(req, 'offset', 0)
     
     cursor.execute(
-        "SELECT id, title FROM curated_news WHERE curated_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') LIMIT ? OFFSET ?",
+        "SELECT id, title FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') LIMIT ? OFFSET ?",
         (cutoff_time, batch_size, offset)
     )
     rows = cursor.fetchall()
@@ -931,18 +1034,18 @@ async def get_export_news(hours: int = 24, min_score: int = 6):
         conn = db.connect()
         cursor = conn.cursor()
         
-        # 计算时间范围 - 数据库存储的是UTC时间，所以使用utcnow()
-        from datetime import timezone
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        # 计算时间范围 - 使用本地时间 (假设与DB格式一致)
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         cutoff_time_str = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
         
-        logger.info(f"查询时间范围: >= {cutoff_time_str} (UTC)")
+        logger.info(f"查询时间范围: >= {cutoff_time_str} (Published)")
         
         # 查询所有被AI评分的数据（approved + rejected）
         cursor.execute("""
-            SELECT id, title, content, source_url, source_site, ai_status, ai_explanation, curated_at
+            SELECT id, title, content, source_url, source_site, ai_status, ai_explanation, curated_at, published_at
             FROM curated_news 
-            WHERE curated_at >= ? 
+            WHERE published_at >= ? 
             AND ai_status IN ('approved', 'rejected')
             AND ai_explanation IS NOT NULL
         """, (cutoff_time_str,))

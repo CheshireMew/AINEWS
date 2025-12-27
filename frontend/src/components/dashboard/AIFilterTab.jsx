@@ -7,6 +7,7 @@ import {
 } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
+import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -20,6 +21,14 @@ const AIFilterTab = ({ onAddToFeatured }) => {
     const [aiFilterPrompt, setAiFilterPrompt] = useState('');
     const [aiFilterHours, setAiFilterHours] = useState(8);
     const [aiFiltering, setAiFiltering] = useState(false);
+
+    // Explicitly define logs state
+    const [logs, setLogs] = useState([]);
+
+    // Helper to add log
+    const addLog = (msg) => {
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} ${msg}`]);
+    };
 
     // Rejected新闻状态
     const [rejectedNews, setRejectedNews] = useState([]);
@@ -88,6 +97,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
         await handleSaveAiConfig();
 
         setAiFiltering(true);
+        setLogs([]); // Reset logs
         let totalProcessed = 0;
         let totalFiltered = 0;
         let batchCount = 0;
@@ -100,21 +110,26 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                 const { processed, filtered, total, results } = res.data;
 
                 // Log detailed results from backend
-                addLog(`✅ Batch ${batchCount} done: Processed ${processed} items (${filtered} filtered)`);
-
-                if (results && results.length > 0) {
-                    results.forEach(item => {
-                        const icon = item.score >= 6 ? '🟢' : '🔴';
-                        // Simple 1-line log format
-                        addLog(`${icon} [${item.score}] ${item.reason} #${item.tag || 'NoTag'} (ID:${item.id})`);
-                    });
-                } else if (processed > 0) {
-                    addLog(`⚠️ No detailed results in response.`);
-                }
-
-                // Accumulate stats
+                // Accumulate stats first to show correct progress
                 totalProcessed += processed;
                 totalFiltered += filtered;
+
+                // Calculate original total estimate:
+                // Backend returns 'total' as current pending count.
+                // So (total returned by backend) + (processed count before this batch) = Original Total.
+                const processedBeforeThisBatch = totalProcessed - processed;
+                const estimatedTotal = total + processedBeforeThisBatch;
+
+                // Show concise progress log
+                const percent = estimatedTotal > 0 ? Math.round((totalProcessed / estimatedTotal) * 100) : 100;
+                addLog(`✅ Batch ${batchCount}: Analyzed ${processed} items (${filtered} rejected). Progress: ${totalProcessed}/${estimatedTotal} (${percent}%)`);
+
+                // Stop logging detailed individual items as per user request
+                /* 
+                if (results && results.length > 0) { ... } 
+                */
+
+
 
                 // Loop termination condition:
                 // If we processed everything available (or nothing was available)
@@ -269,13 +284,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                             </div>
                             <Space>
                                 <span>时间范围:</span>
-                                <Select value={aiFilterHours} style={{ width: 120 }} onChange={setAiFilterHours}>
-                                    <Option value={2}>2小时内</Option>
-                                    <Option value={6}>6小时内</Option>
-                                    <Option value={8}>8小时内</Option>
-                                    <Option value={12}>12小时内</Option>
-                                    <Option value={24}>24小时内</Option>
-                                </Select>
+                                <TimeRangeSelect value={aiFilterHours} onChange={setAiFilterHours} />
                                 <Button type="primary" onClick={handleAIFilter} loading={aiFiltering}>
                                     开始AI筛选
                                 </Button>
@@ -287,34 +296,29 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ marginBottom: 8 }}>运行日志:</div>
                         <div style={{
-                            flex: 1,
                             background: '#000',
                             color: '#0f0',
                             padding: '12px',
                             borderRadius: 4,
                             fontSize: 12,
-                            height: 180,
+                            height: '240px', // Fixed height matching left side approx
                             overflowY: 'auto',
-                            fontFamily: 'monospace'
+                            fontFamily: 'monospace',
+                            width: '100%' // Ensure full width of container
                         }}>
                             <div style={{ color: '#8c8c8c', marginBottom: 8, borderBottom: '1px solid #333', paddingBottom: 4 }}>
                                 &gt; CONSOLE OUTPUT
                             </div>
-                            {aiFiltering ? (
-                                <div>
-                                    <div>&gt; AI筛选任务已启动...</div>
-                                    <div>&gt; 正在获取 {aiFilterHours} 小时内的新闻数据...</div>
-                                    <div>&gt; 正在调用 DeepSeek API 进行分析...</div>
-                                    <div style={{ color: '#aaa', fontStyle: 'italic', marginTop: 8 }}>
-                                        (处理时间取决于数据量，请耐心等待...)
-                                    </div>
-                                </div>
-                            ) : (
-                                <div>
-                                    {/* 这里可以保留上一次的简要结果，或者显示等待状态 */}
-                                    <div>&gt; {aiFilterPrompt ? 'Ready to run.' : 'Waiting for prompt...'}</div>
-                                </div>
-                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {logs.length === 0 && !aiFiltering ? (
+                                    <div style={{ color: '#666' }}>&gt; Ready to run.</div>
+                                ) : (
+                                    logs.map((log, index) => (
+                                        <div key={index} style={{ wordBreak: 'break-all' }}>&gt; {log}</div>
+                                    ))
+                                )}
+                                {aiFiltering && <div style={{ color: '#aaa', fontStyle: 'italic' }}>... Processing ...</div>}
+                            </div>
                         </div>
                     </div>
                 </div>

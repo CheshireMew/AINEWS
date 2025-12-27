@@ -1,6 +1,7 @@
 # AINEWS 项目功能清单
 
 > **生成时间**：2024-12-26  
+> **最后更新**：2024-12-27  
 > **基于重构后的组件结构**  
 > **用途**：代码重构和功能验证的参考基线
 
@@ -16,15 +17,16 @@
 2. `DeduplicatedTab.jsx` (201 行) - 去重数据  
 3. `FilterSettingsTab.jsx` (316 行) - 过滤设置
 4. `CuratedNewsTab.jsx` (155 行) - 精选数据
-5. `AIFilterTab.jsx` (374 行) - AI 筛选
+5. `AIFilterTab.jsx` (380 行) - AI 筛选
 6. `AIBestTab.jsx` (158 行) - AI 精选
-7. `ExportTab.jsx` (230 行) - 新闻输出
+7. `ExportTab.jsx` (236 行) - 新闻输出
 8. `SpiderControlTab.jsx` (35 行) - 爬虫控制
 9. `ScraperCard.jsx` (162 行) - 爬虫卡片
 
 ### 辅助组件
 - `NewsToolbar.jsx` (90 行) - 通用新闻工具栏
 - `NewsExpandedView.jsx` (35 行) - 新闻展开视图
+- `TimeRangeSelect.jsx` (42 行) - 通用时间范围选择器
 
 ---
 
@@ -612,6 +614,37 @@
 - `showAiTag` (Boolean) - 显示AI标签
 - `showStage` (Boolean) - 显示状态
 
+### TimeRangeSelect - 通用时间范围选择器
+
+**功能**: 提供统一的时间范围选择下拉框,用于各个Tab的时间筛选功能。
+
+**选项**: 
+- 2小时内 (value: 2)
+- 6小时内 (value: 6)
+- 8小时内 (value: 8)
+- 12小时内 (value: 12)
+- 24小时内 (value: 24)
+- 3天内 (value: 72)
+- 7天内 (value: 168)
+- 全部时间 (value: 0)
+
+**Props**:
+- `value` (Number) - 当前选中值 (默认: 8)
+- `onChange` (Function, 必需) - 值变更回调
+- `style` (Object) - 自定义样式
+- `title` (String) - 默认悬停提示: "筛选基于新闻发布时间 (北京时间)"
+
+**使用组件**:
+- AIFilterTab (AI筛选时间范围)
+- ExportTab (新闻输出时间范围)  
+- FilterSettingsTab (本地过滤时间范围)
+- NewsManagementTab (去重时间范围)
+
+**重要说明**: 
+- 所有时间筛选均基于 **`published_at`** (新闻发布时间)
+- 采用 **北京时间** (UTC+8)
+- 后端使用 `datetime.now()` 计算时间范围
+
 ---
 
 ## 📊 API 方法汇总
@@ -686,6 +719,68 @@
 ### 4. PropTypes 类型检查
 - 所有组件都添加了 PropTypes 定义
 - 提供运行时类型检查和文档
+
+---
+
+## 🔥 最近更新 (2024-12-27)
+
+### 时间筛选逻辑优化
+**影响范围**: AIFilterTab, ExportTab, 后端API
+
+**变更内容**:
+1. **AI 筛选 (`ai_filter_curated`)**: 
+   - ✅ 从 `curated_at` (入库时间) 切换为 `published_at` (发布时间)
+   - ✅ 修复时间计算从 `datetime.utcnow()` 变更为 `datetime.now()` (北京时间)
+   
+2. **新闻输出 (`get_export_news`)**: 
+   - ✅ 从 `curated_at` (入库时间) 切换为 `published_at` (发布时间)
+   - ✅ 修复时间计算从 `datetime.utcnow()` 变更为 `datetime.now()` (北京时间)
+
+**用户体验改善**:
+- 选择 "8小时内" 现在表示**新闻发布时间在过去8小时内**
+- 避免将旧新闻(补录)误判为新新闻
+- 所有时间筛选统一使用**北京时间 (UTC+8)**
+
+### AI 筛选进度显示修复
+**影响范围**: AIFilterTab.jsx
+
+**问题**: 进度显示超过 100% (例如: `113%`, `183%`)
+
+**根本原因**: 后端返回的 `total` 是"当前剩余待处理总数" (动态减少), 前端误将其当作"初始总数" (固定值)
+
+**解决方案**:
+- 动态计算: `estimatedTotal = remainingTotal + itemsProcessedBeforeThisBatch`
+- 正确公式: `progress = totalProcessed / estimatedTotal * 100`
+
+**效果**: 进度条正常显示为 `10/100 (10%)`, `20/100 (20%)` ...
+
+### Telegram 富文本复制功能
+**影响范围**: ExportTab.jsx
+
+**新增功能**: "TG格式" 按钮支持富文本复制
+
+**技术实现**:
+- 使用 `navigator.clipboard.write()` API
+- 写入 `text/html` MIME 类型 (可点击的蓝色链接)
+- 写入 `text/plain` MIME 类型 (纯文本 fallback)
+
+**用户体验**:
+- 复制后粘贴到 Telegram → 显示为**可点击的蓝色链接**
+- 不再是 `<a href="...">标题</a>` 原始代码
+
+### 通用组件统一
+**影响范围**: ExportTab.jsx, TimeRangeSelect.jsx
+
+**变更内容**:
+1. `ExportTab` 使用通用 `TimeRangeSelect` 组件
+2. `TimeRangeSelect` 添加悬停提示: "筛选基于新闻发布时间 (北京时间)"
+3. 移除重复的时间范围选择器代码
+
+**代码优化**: 减少冗余代码, 统一UI/UX体验
+
+### Bug 修复
+1. **ExportTab.jsx**: 补充缺失的 `Tag` 导入 (`import { Tag } from 'antd'`)
+2. **AIFilterTab.jsx**: 确认 `logs` 状态和 `addLog` 函数定义正常 (热更新缓存问题)
 
 ---
 

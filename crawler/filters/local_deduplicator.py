@@ -336,8 +336,18 @@ class LocalDeduplicator:
         duplicates = []
         n = len(news_list)
         
+        if len(news_list) > 1000:
+            print(f"[LocalDeduplicator] 开始计算相似度，数据量: {n}")
+            
+        comparisons = 0
+        total_comparisons = (n * (n - 1)) // 2
+        
         for i in range(n):
             for j in range(i + 1, n):
+                comparisons += 1
+                if comparisons % 10000 == 0:
+                    print(f"[LocalDeduplicator] 进度: {comparisons}/{total_comparisons} ({comparisons/total_comparisons:.1%})")
+                    
                 news1 = news_list[i]
                 news2 = news_list[j]
                 
@@ -347,18 +357,29 @@ class LocalDeduplicator:
                     time2 = news2['published_at']
                     
                     if isinstance(time1, str):
-                        time1 = datetime.fromisoformat(time1.replace('Z', '+00:00'))
+                        # 处理带时区的 ISO 8601 字符串
+                        time1 = time1.replace('Z', '+00:00')
+                        time1 = datetime.fromisoformat(time1)
                     if isinstance(time2, str):
-                        time2 = datetime.fromisoformat(time2.replace('Z', '+00:00'))
+                        time2 = time2.replace('Z', '+00:00')
+                        time2 = datetime.fromisoformat(time2)
+                    
+                    
+                    # 确保都是 offset-aware 或 offset-naive
+                    if time1.tzinfo is None and time2.tzinfo is not None:
+                        time1 = time1.replace(tzinfo=time2.tzinfo)
+                    elif time1.tzinfo is not None and time2.tzinfo is None:
+                        time2 = time2.replace(tzinfo=time1.tzinfo)
                     
                     time_diff = abs((time1 - time2).total_seconds() / 3600)
                     
                     # 超出时间窗口，不比较
-                    if time_diff > self.time_window_hours:
+                    # 注意：如果 time_window_hours 为 0，表示"全部"(无限窗口)，不应该跳过
+                    if self.time_window_hours > 0 and time_diff > self.time_window_hours:
                         continue
                         
-                except Exception:
-                    # 时间解析失败，继续比较
+                except Exception as e:
+                    # 时间解析失败，继续比较 (安全回退)
                     pass
                 
                 # 计算相似度
@@ -366,7 +387,9 @@ class LocalDeduplicator:
                 
                 if similarity >= self.similarity_threshold:
                     duplicates.append((i, j, similarity))
+                    # print(f"  [发现重复] {similarity:.2f}: {news1['title'][:20]}... <-> {news2['title'][:20]}...")
         
+        print(f"[LocalDeduplicator] 完成。发现 {len(duplicates)} 对重复。")
         return duplicates
     
     def mark_duplicates(self, news_list: List[dict]) -> List[dict]:

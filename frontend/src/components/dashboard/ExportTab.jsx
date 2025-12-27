@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { Card, Select, Button, Space, message, DatePicker } from 'antd';
+import { Card, Select, Button, Space, message, DatePicker, Table, Tag } from 'antd';
 import { getExportNews } from '../../api';
+import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
 
@@ -74,15 +75,45 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
     /**
      * 复制为TG格式
      */
-    const handleCopyTG = () => {
+    const handleCopyTG = async () => {
         const selected = exportNews.filter(n => selectedNewsIds.includes(n.id));
         if (selected.length === 0) {
             message.warning('请先选择要复制的新闻');
             return;
         }
-        const text = selected.map(n => `<a href="${n.source_url}">${n.title}</a>`).join('\n');
-        navigator.clipboard.writeText(text);
-        message.success(`已复制 ${selected.length} 条新闻（TG格式）`);
+
+        // 1. 构建 HTML 内容 (用于富文本粘贴，如 Telegram)
+        const htmlContent = selected
+            .map(n => `<a href="${n.source_url}">${n.title}</a>`)
+            .join('<br><br>');
+
+        // 2. 构建纯文本内容 (Fallback)
+        // 如果粘贴到不支持富文本的地方，显示 标题 + 链接
+        const plainText = selected
+            .map(n => `${n.title}\n${n.source_url}`)
+            .join('\n\n');
+
+        try {
+            // 使用 Clipboard API 写入两种格式
+            const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+            const textBlob = new Blob([plainText], { type: 'text/plain' });
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/html': htmlBlob,
+                    'text/plain': textBlob
+                })
+            ]);
+            message.success(`已复制 ${selected.length} 条 (富文本)，粘贴到TG即为蓝色链接`);
+        } catch (err) {
+            console.error('Rich text copy failed:', err);
+            // 降级方案：复制原始 HTML 字符串
+            const fallbackText = selected
+                .map(n => `<a href="${n.source_url}">${n.title}</a>`)
+                .join('\n');
+            await navigator.clipboard.writeText(fallbackText);
+            message.warning('富文本复制失败，已复制HTML源码');
+        }
     };
 
     /**
@@ -151,12 +182,7 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
                 <Space size="large">
                     <div>
                         <span style={{ marginRight: 8 }}>时间范围:</span>
-                        <Select value={exportTimeRange} style={{ width: 120 }} onChange={setExportTimeRange}>
-                            <Option value={6}>6小时内</Option>
-                            <Option value={12}>12小时内</Option>
-                            <Option value={24}>24小时内</Option>
-                            <Option value={48}>48小时内</Option>
-                        </Select>
+                        <TimeRangeSelect value={exportTimeRange} onChange={setExportTimeRange} />
                     </div>
                     <div>
                         <span style={{ marginRight: 8 }}>最低评分:</span>

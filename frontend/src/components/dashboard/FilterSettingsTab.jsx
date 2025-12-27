@@ -7,6 +7,7 @@ import {
 } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
+import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
 
@@ -226,12 +227,7 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
             <div style={{ marginBottom: 20 }}>
                 <h3>1. 执行本地过滤 (关键词黑名单)</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <Select value={filterTimeRange} style={{ width: 120 }} onChange={setFilterTimeRange}>
-                        <Option value={6}>6小时内</Option>
-                        <Option value={12}>12小时内</Option>
-                        <Option value={24}>24小时内</Option>
-                        <Option value={48}>48小时内</Option>
-                    </Select>
+                    <TimeRangeSelect value={filterTimeRange} onChange={setFilterTimeRange} />
                     <Button type="primary" onClick={handleFilterNews} loading={filtering}>
                         立即执行过滤
                     </Button>

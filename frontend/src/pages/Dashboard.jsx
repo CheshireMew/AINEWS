@@ -27,6 +27,8 @@ import dayjs from 'dayjs'; // Import dayjs
 const { Header, Content } = Layout;
 const { Option } = Select;
 
+import TimeRangeSelect from '../components/dashboard/TimeRangeSelect';
+
 const Dashboard = () => {
     const navigate = useNavigate();
     const [stats, setStats] = useState([]);
@@ -40,9 +42,7 @@ const Dashboard = () => {
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
     const [filterSource, setFilterSource] = useState(null);
 
-    // Deduplication
-    const [deduplicating, setDeduplicating] = useState(false);
-    const [dedupTimeRange, setDedupTimeRange] = useState(6); // Default 6 hours (User Request)
+
 
     // Deduplicated news
     const [dedupNews, setDedupNews] = useState([]);
@@ -421,6 +421,9 @@ const Dashboard = () => {
                         activeKey={activeKey}
                         onChange={(key) => {
                             setActiveKey(key);
+                            // 切换Tab时立即刷新全局计数
+                            fetchGlobalCounts();
+
                             if (key === '1') {
                                 fetchNews(1, filterSource);
                                 fetchStats();
@@ -432,10 +435,8 @@ const Dashboard = () => {
                                 // 新闻输出tab，无需自动加载数据（用户手动点击加载按钮）
                             } else if (key === '8') { // AI Filter Tab
                                 fetchRejectedNews(1);
-                                fetchGlobalCounts(); // Refresh counts when clicked
                             } else if (key === '9') { // AI Best Tab
                                 fetchApprovedNews(1);
-                                fetchGlobalCounts(); // Refresh counts when clicked
                             }
                         }}
                         items={[
@@ -457,7 +458,7 @@ const Dashboard = () => {
                             {
                                 key: '5',
                                 label: <span><DatabaseOutlined />精选数据 ({globalCounts.curated})</span>,
-                                children: <CuratedNewsTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
+                                children: <CuratedNewsTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} active={activeKey === '5'} />
                             },
                             {
                                 key: '8',

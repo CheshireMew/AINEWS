@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { Table, Button, Select, Space, Tag, message, Popconfirm } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getNews, deleteNews, deduplicateNews } from '../../api';
+import { getNews, deleteNews } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
 
-const { Option } = Select;
+
 
 /**
  * 数据管理Tab组件
@@ -19,8 +19,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
     const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
     const [filterSource, setFilterSource] = useState(undefined);
     const [filterKeyword, setFilterKeyword] = useState('');
-    const [dedupTimeRange, setDedupTimeRange] = useState(6);
-    const [deduplicating, setDeduplicating] = useState(false);
+
 
     /**
      * 获取新闻数据
@@ -55,21 +54,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
         }
     };
 
-    /**
-     * 手动去重
-     */
-    const handleDeduplicate = async () => {
-        setDeduplicating(true);
-        try {
-            const res = await deduplicateNews(dedupTimeRange, 'mark');
-            message.success(`去重完成！标记了 ${res.data.stats.duplicates_processed} 条重复新闻, 归档了 ${res.data.stats.archived_count} 条`);
-            fetchNews(pagination.current, filterSource);
-        } catch (e) {
-            message.error('去重失败: ' + (e.response?.data?.detail || e.message));
-        } finally {
-            setDeduplicating(false);
-        }
-    };
+
 
     // 组件加载时获取数据
     useEffect(() => {
@@ -140,28 +125,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
                 onRefresh={() => fetchNews(pagination.current, filterSource, filterKeyword)}
                 loading={loading}
             >
-                <div style={{ borderLeft: '1px solid #d9d9d9', height: 24, margin: '0 8px' }} />
-                <span style={{ fontSize: 14 }}>去重范围:</span>
-                <Select
-                    value={dedupTimeRange}
-                    style={{ width: 110 }}
-                    onChange={setDedupTimeRange}
-                >
-                    <Option value={0}>全部</Option>
-                    <Option value={6}>6小时内</Option>
-                    <Option value={12}>12小时内</Option>
-                    <Option value={24}>24小时内</Option>
-                    <Option value={48}>48小时内</Option>
-                    <Option value={72}>3天内</Option>
-                    <Option value={168}>7天内</Option>
-                </Select>
-                <Button
-                    type="primary"
-                    onClick={handleDeduplicate}
-                    loading={deduplicating}
-                >
-                    手动去重
-                </Button>
+
             </NewsToolbar>
 
             <Table

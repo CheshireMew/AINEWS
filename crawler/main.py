@@ -11,7 +11,7 @@ sys.path.append(str(Path(__file__).parent))
 from database.db import Database
 from filters.keyword_filter import KeywordFilter
 from ai.tagger import AITagger
-from ai.deduplicator import AIDuplicateDetector
+# from ai.deduplicator import AIDuplicateDetector (AI去重已移除)
 from scrapers.techflow import TechFlowScraper
 from scrapers.odaily import OdailyScraper
 from scrapers.blockbeats import BlockBeatsScraper
@@ -28,7 +28,7 @@ class NewsCrawler:
         self.db = Database()
         self.keyword_filter = KeywordFilter()
         self.ai_tagger = AITagger()
-        self.deduplicator = AIDuplicateDetector()
+        # self.deduplicator = AIDuplicateDetector() (AI去重已移除)
         
         # 初始化爬虫列表（8个加密媒体）
         self.scrapers = [
@@ -173,51 +173,53 @@ class NewsCrawler:
         return news_list
     
     def apply_deduplication(self, news_list: list):
-        """应用去重"""
-        print("\n=== AI去重检测 ===")
+        """应用去重 (当前已禁用AI去重，改为前端手动触发本地去重)"""
+        # print("\n=== AI去重检测 ===")
+        # 暂时跳过去重，依赖 Dashboard 的手动本地去重功能
+        return news_list
         
         # 获取最近24小时的新闻用于对比
-        existing_news = self.db.get_recent_news_for_dedup(hours=24)
+        # existing_news = self.db.get_recent_news_for_dedup(hours=24)
         
-        duplicate_count = 0
-        for news in news_list:
-            try:
-                result = self.deduplicator.find_duplicate(news, existing_news)
-                
-                if result['is_duplicate']:
-                    duplicate_count += 1
-                    
-                    # 标记为重复
-                    self.db.update_news(news['id'], {
-                        'is_duplicate': True,
-                        'duplicate_of': result['duplicate_of'],
-                        'similarity_score': result['similarity']
-                    })
-                    
-                    # 合并来源
-                    original_news = result['matched_news']
-                    sources = original_news.get('multiple_sources', [original_news['source_site']])
-                    if news['source_site'] not in sources:
-                        sources.append(news['source_site'])
-                        self.db.update_news(result['duplicate_of'], {
-                            'multiple_sources': sources
-                        })
-                    
-                    # 记录日志
-                    self.db.log_processing(
-                        news['id'],
-                        'dedup',
-                        'duplicate_found',
-                        f"与新闻#{result['duplicate_of']}重复，相似度{result['similarity']:.2%}"
-                    )
-                    
-                    print(f"  发现重复: {news['title'][:40]}... (相似度{result['similarity']:.2%})")
-                    
-            except Exception as e:
-                print(f"去重检测失败: {e}")
-        
-        print(f"发现重复: {duplicate_count}/{len(news_list)} 条")
-        return news_list
+        # duplicate_count = 0
+        # for news in news_list:
+        #     try:
+        #         result = self.deduplicator.find_duplicate(news, existing_news)
+        #         
+        #         if result['is_duplicate']:
+        #             duplicate_count += 1
+        #             
+        #             # 标记为重复
+        #             self.db.update_news(news['id'], {
+        #                 'is_duplicate': True,
+        #                 'duplicate_of': result['duplicate_of'],
+        #                 'similarity_score': result['similarity']
+        #             })
+        #             
+        #             # 合并来源
+        #             original_news = result['matched_news']
+        #             sources = original_news.get('multiple_sources', [original_news['source_site']])
+        #             if news['source_site'] not in sources:
+        #                 sources.append(news['source_site'])
+        #                 self.db.update_news(result['duplicate_of'], {
+        #                     'multiple_sources': sources
+        #                 })
+        #             
+        #             # 记录日志
+        #             self.db.log_processing(
+        #                 news['id'],
+        #                 'dedup',
+        #                 'duplicate_found',
+        #                 f"与新闻#{result['duplicate_of']}重复，相似度{result['similarity']:.2%}"
+        #             )
+        #             
+        #             print(f"  发现重复: {news['title'][:40]}... (相似度{result['similarity']:.2%})")
+        #             
+        #     except Exception as e:
+        #         print(f"去重检测失败: {e}")
+        # 
+        # print(f"发现重复: {duplicate_count}/{len(news_list)} 条")
+        # return news_list
     
     async def run(self, dry_run=False):
         """运行完整流程"""
