@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { Card, Select, Button, Space, message, DatePicker, Table, Tag } from 'antd';
-import { getExportNews } from '../../api';
+import { SendOutlined } from '@ant-design/icons';
+import { getExportNews, sendNewsToTelegram, triggerDailyPush } from '../../api';
 import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
@@ -19,6 +20,7 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
     const [exportNews, setExportNews] = useState([]);
     const [newsExportLoading, setNewsExportLoading] = useState(false);
     const [selectedNewsIds, setSelectedNewsIds] = useState([]);
+    const [sendingToTg, setSendingToTg] = useState(false);
 
     /**
      * 加载新闻
@@ -67,13 +69,16 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
             message.warning('请先选择要复制的新闻');
             return;
         }
-        const text = selected.map(n => `- [${n.title}](${n.source_url})`).join('\n');
+        const text = selected.map(n => {
+            const content = n.content ? n.content.replace(/\n/g, '\n>\n> ') : 'No Content';
+            return `### [${n.title}](${n.source_url})\n\n> ${content}\n\n---`;
+        }).join('\n\n');
         navigator.clipboard.writeText(text);
-        message.success(`已复制 ${selected.length} 条新闻（Markdown）`);
+        message.success(`已复制 ${selected.length} 条新闻`);
     };
 
     /**
-     * 复制为TG格式
+     * 复制为TG格式（HTML超链接）
      */
     const handleCopyTG = async () => {
         const selected = exportNews.filter(n => selectedNewsIds.includes(n.id));
@@ -82,19 +87,34 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
             return;
         }
 
-        // 1. 构建 HTML 内容 (用于富文本粘贴，如 Telegram)
-        const htmlContent = selected
-            .map(n => `<a href="${n.source_url}">${n.title}</a>`)
+        // TG Footer constants - Simple HTML fragment
+        const footerHtml = `
+<br><br>
+<a href="https://0xcheshire.gitbook.io/web3/">币圈新人手册</a><br>
+注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join/A999998">欧易</a><br>
+Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <a href="https://web3.okx.com/ul/joindex?ref=1234567">OKX</a> <a href="https://link.metamask.io/rewards?referral=36P4HH">小狐狸（刷分）</a>`;
+
+        const footerText = `
+币圈新人手册 https://0xcheshire.gitbook.io/web3/
+注册交易所 币安 https://binance.com/join?ref=SRXT5KUM 欧易 https://okx.com/join/A999998  
+Web3钱包 币安 https://web3.binance.com/referral?ref=RP3AEJ2M OKX https://web3.okx.com/ul/joindex?ref=1234567 小狐狸（刷分） https://link.metamask.io/rewards?referral=36P4HH`;
+
+        // 构建HTML内容，Telegram支持的格式
+        // 既然用户提供的"老代码"好用，我们回归最简模式：只用<a>和<br>
+        const htmlLinks = selected
+            .map(n => `<a href="${n.source_url}">${escapeHtml(n.title)}</a>`)
             .join('<br><br>');
 
-        // 2. 构建纯文本内容 (Fallback)
-        // 如果粘贴到不支持富文本的地方，显示 标题 + 链接
+        // 拼接 HTML (不带 DOCTYPE/html/body，因为用户反馈这样好用)
+        const htmlContent = htmlLinks + footerHtml;
+
+        // 纯文本fallback - 包含链接
         const plainText = selected
             .map(n => `${n.title}\n${n.source_url}`)
-            .join('\n\n');
+            .join('\n\n') + '\n' + footerText;
 
         try {
-            // 使用 Clipboard API 写入两种格式
+            // 写入剪贴板
             const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
             const textBlob = new Blob([plainText], { type: 'text/plain' });
 
@@ -104,15 +124,39 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
                     'text/plain': textBlob
                 })
             ]);
-            message.success(`已复制 ${selected.length} 条 (富文本)，粘贴到TG即为蓝色链接`);
+            message.success(`已复制 ${selected.length} 条，粘贴到Telegram即为蓝色链接`);
         } catch (err) {
-            console.error('Rich text copy failed:', err);
-            // 降级方案：复制原始 HTML 字符串
-            const fallbackText = selected
-                .map(n => `<a href="${n.source_url}">${n.title}</a>`)
-                .join('\n');
-            await navigator.clipboard.writeText(fallbackText);
-            message.warning('富文本复制失败，已复制HTML源码');
+            console.error('Copy failed:', err);
+            message.error('复制失败，请重试');
+        }
+    };
+
+    // HTML转义函数
+    const escapeHtml = (text) => {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    };
+
+    /**
+     * 发送到Telegram
+     */
+    const handleSendToTelegram = async () => {
+        const selected = exportNews.filter(n => selectedNewsIds.includes(n.id));
+        if (selected.length === 0) {
+            message.warning('请先选择要发送的新闻');
+            return;
+        }
+
+        try {
+            setSendingToTg(true);
+            const response = await sendNewsToTelegram(selectedNewsIds);
+            message.success(response.message || `成功发送${selected.length}条新闻到Telegram`);
+        } catch (err) {
+            console.error('Send to Telegram failed:', err);
+            message.error(err.message || '发送失败，请检查Telegram配置');
+        } finally {
+            setSendingToTg(false);
         }
     };
 
@@ -202,6 +246,25 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
                     >
                         加载新闻
                     </Button>
+                    <Button
+                        onClick={async () => {
+                            try {
+                                message.loading('正在触发日报推送...', 1);
+                                const res = await triggerDailyPush();
+                                if (res.data && res.data.status === 'success') {
+                                    message.success(`推送成功: 已发送 ${res.data.count} 条精选新闻`);
+                                } else if (res.data && res.data.status === 'skipped') {
+                                    message.warning(`推送跳过: ${res.data.message}`);
+                                } else {
+                                    message.warning('推送完成，请检查TG消息');
+                                }
+                            } catch (e) {
+                                message.error('触发失败: ' + (e.response?.data?.message || e.message));
+                            }
+                        }}
+                    >
+                        推送精选日报 (20:00)
+                    </Button>
                 </Space>
             </Card>
 
@@ -221,6 +284,14 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
                         <Button type="primary" onClick={handleCopyPlainText}>复制为纯文本</Button>
                         <Button onClick={handleCopyMarkdown}>Markdown格式</Button>
                         <Button onClick={handleCopyTG}>TG格式</Button>
+                        <Button
+                            icon={<SendOutlined />}
+                            onClick={handleSendToTelegram}
+                            loading={sendingToTg}
+                        >
+                            发送到TG
+                        </Button>
+
                     </Space>
                 </Card>
             )}

@@ -12,7 +12,7 @@ class ForesightScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取Foresight News的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 点击"只看重要"开关

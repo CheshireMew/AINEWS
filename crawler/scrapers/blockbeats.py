@@ -12,7 +12,7 @@ class BlockBeatsScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取TheBlockBeats的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 点击"重要快讯"筛选
@@ -66,10 +66,25 @@ class BlockBeatsScraper(BaseScraper):
                 processed_urls.add(url)
 
                 
-                # 提取时间
-                time_el = await container.query_selector('[class*="time"]') if container else None
-                time_text = await self.safe_extract_text(time_el) if time_el else ""
-                published_at = self.parse_relative_time(time_text) if time_text else datetime.now()
+                # 提取时间 - BlockBeats的时间在标题文本开头（例如："08:31 新闻标题"）
+                time_match = re.match(r'^(\d{2}:\d{2})', title_text)
+                if time_match:
+                    time_str = time_match.group(1)
+                    # 解析为今天的时间
+                    now = datetime.now()
+                    hour, minute = map(int, time_str.split(':'))
+                    published_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    
+                    # 如果解析出的时间在未来，说明是昨天的新闻
+                    if published_at > now:
+                        from datetime import timedelta
+                        published_at = published_at - timedelta(days=1)
+                    
+                    print(f"[DEBUG] 提取时间: {time_str} -> {published_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    # 如果没有匹配到时间，使用当前时间
+                    print(f"[DEBUG] 未匹配到时间，title_text={title_text[:50]}")
+                    published_at = datetime.now()
                 
                 # 确定重要标识
                 if has_first_badge:
@@ -110,7 +125,7 @@ class BlockBeatsScraper(BaseScraper):
                     'title': title,
                     'content': content,
                     'url': url,
-                    'published_at': published_at,
+                    'published_at': published_at.strftime('%Y-%m-%d %H:%M:%S'),  # 转换为字符串格式
                     'is_marked_important': True,
                     'site_importance_flag': importance_flag
                 }

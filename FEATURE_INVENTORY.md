@@ -1,7 +1,7 @@
 # AINEWS 项目功能清单
 
-> **生成时间**：2024-12-26  
-> **最后更新**：2024-12-27  
+> **生成时间**：2025-12-26  
+> **最后更新**：2025-12-27  
 > **基于重构后的组件结构**  
 > **用途**：代码重构和功能验证的参考基线
 
@@ -17,9 +17,9 @@
 2. `DeduplicatedTab.jsx` (201 行) - 去重数据  
 3. `FilterSettingsTab.jsx` (316 行) - 过滤设置
 4. `CuratedNewsTab.jsx` (155 行) - 精选数据
-5. `AIFilterTab.jsx` (380 行) - AI 筛选
+5. `AIFilterTab.jsx` (346 行) - AI 筛选
 6. `AIBestTab.jsx` (158 行) - AI 精选
-7. `ExportTab.jsx` (236 行) - 新闻输出
+7. `ExportTab.jsx` (310 行) - 新闻输出
 8. `SpiderControlTab.jsx` (35 行) - 爬虫控制
 9. `ScraperCard.jsx` (162 行) - 爬虫卡片
 
@@ -486,54 +486,44 @@
 
 | 变量名 | 类型 | 初始值 | 用途 | 行号 |
 |--------|------|--------|------|------|
-| exportStage | String | 'curated' | 导出阶段 | L10 |
-| exportTimeRange | Number | 2 | 导出时间范围(小时) | L11 |
-| customStartDate | Dayjs/null | null | 自定义开始日期 | L12 |
-| customEndDate | Dayjs/null | null | 自定义结束日期 | L13 |
-| exportList | Array | [] | 导出预览列表 | L14 |
-| loadingExport | Boolean | false | 加载中 | L15 |
+| exportTimeRange | Number | 24 | 导出时间范围(小时) | L16 |
+| exportMinScore | Number | 6 | 最低评分筛选 | L17 |
+| exportNews | Array | [] | 导出新闻列表 | L20 |
+| newsExportLoading | Boolean | false | 加载中状态 | L21 |
+| selectedNewsIds | Array | [] | 已选新闻ID | L22 |
+| sendingToTg | Boolean | false | 发送中状态 | L23 |
 
 ### 功能按钮
 
 | 按钮名称 | 事件函数 | 功能说明 | 位置 | 行号 |
 |----------|----------|----------|------|------|
-| 查询 | handleQuery | 查询预览 | 查询区域 | L41 |
-| 导出 | handleExport | 执行导出 | 导出区域 | L135 |
-
-### 导出阶段选项
-
-| 值 | 标签 | 行号 |
-|----|------|------|
-| raw | 原始新闻 | L57 |
-| deduplicated | 去重新闻 | L58 |
-| curated | 精选新闻 | L59 |
-| ai_approved | AI 精选 | L60 |
-| manual_featured | 手动加精 | L61 |
-
-### 时间范围选项
-
-| 值 | 标签 | 行号 |
-|----|------|------|
-| 2 | 2小时内 | L75 |
-| 6 | 6小时内 | L76 |
-| 12 | 12小时内 | L77 |
-| 24 | 24小时内 | L78 |
-| 168 | 7天内 | L79 |
-| 720 | 30天内 | L80 |
-| 0 | 自定义 | L81 |
+| 加载新闻 | handleLoadNews | 加载符合条件新闻 | 筛选区域 | L28 |
+| 全选/取消 | handleToggleSelectAll | 批量选择 | 操作栏 | L163 |
+| 反选 | handleInvertSelection | 反向选择 | 操作栏 | L174 |
+| 复制纯文本 | handleCopyPlainText | 复制标题+内容 | 操作栏 | L47 |
+| Markdown | handleCopyMarkdown | 复制MD链接 | 操作栏 | L66 |
+| TG格式 | handleCopyTG | 复制HTML富文本 | 操作栏 | L80 |
+| 发送到TG | handleSendToTelegram | 调用API推送 | 操作栏 | L141 |
 
 ### API 调用
 
 | 函数名 | API 方法 | 参数 | 功能 | 行号 |
 |--------|----------|------|------|------|
-| handleQuery | getExportNews | stage, timeRange, startDate, endDate | 查询预览 | L22-38 |
-| handleExport | exportNews | stage, timeRange, startDate, endDate | 执行导出 | L100-132 |
+| handleLoadNews | getExportNews | timeRange, minScore | 获取新闻预览 | L33 |
+| handleSendToTelegram | sendNewsToTelegram | newsIds | 推送至TG | L150 |
+
+### 辅助函数
+
+| 函数名 | 功能 | 行号 |
+|--------|------|------|
+| escapeHtml | HTML字符转义 | L132 |
 
 ### Props 接收
 
 | Prop 名 | 类型 | 必需 | 用途 | PropTypes行号 |
 |---------|------|------|------|---------------|
-| manuallyFeatured | Array | 否 | 手动加精列表 | L228 |
+| manuallyFeatured | Array | 否 | 手动加精列表 | L14 |
+| setManuallyFeatured | Function | 否 | 更新加精列表 | L14 |
 
 ---
 
@@ -754,19 +744,25 @@
 
 **效果**: 进度条正常显示为 `10/100 (10%)`, `20/100 (20%)` ...
 
-### Telegram 富文本复制功能
-**影响范围**: ExportTab.jsx
+### Telegram 富文本复制与推广后缀
+**影响范围**: ExportTab.jsx, backend/main.py
 
-**新增功能**: "TG格式" 按钮支持富文本复制
+**新增功能**: 
+1. **全局推广后缀**: 后端定义 `TELEGRAM_FOOTER`，自动追加到所有推送消息末尾。
+2. **富文本剪贴板**: 前端 "TG格式" 按钮现在支持复制带颜色链接的 HTML 片段。
+3. **一致性体验**: 手动推送("发送到TG")与手动复制("TG格式")输出内容完全一致。
 
-**技术实现**:
-- 使用 `navigator.clipboard.write()` API
-- 写入 `text/html` MIME 类型 (可点击的蓝色链接)
-- 写入 `text/plain` MIME 类型 (纯文本 fallback)
+**技术细节**:
+- **后端**: 在 `send_news_to_telegram` 和 `auto_telegram_push` 中集成后缀追加逻辑，并处理长消息截断。
+- **前端**: `ExportTab.jsx` 使用 HTML Fragment (`<a>` + `<br>`) 写入剪贴板，完美兼容 Telegram Desktop 粘贴。
 
-**用户体验**:
-- 复制后粘贴到 Telegram → 显示为**可点击的蓝色链接**
-- 不再是 `<a href="...">标题</a>` 原始代码
+### 自动化流水线增强
+**影响范围**: backend/main.py
+
+**新增功能**:
+1. **智能休眠**: 每日 00:00 - 08:00 (北京时间) 进入休眠模式，减少资源消耗。
+2. **智能等待**: 每次循环开始前智能检查爬虫状态，避免固定延时。
+3. **全自动推送**: 自动筛选 >=5 分新闻并推送到 Telegram，带推广后缀。
 
 ### 通用组件统一
 **影响范围**: ExportTab.jsx, TimeRangeSelect.jsx
@@ -779,8 +775,9 @@
 **代码优化**: 减少冗余代码, 统一UI/UX体验
 
 ### Bug 修复
-1. **ExportTab.jsx**: 补充缺失的 `Tag` 导入 (`import { Tag } from 'antd'`)
-2. **AIFilterTab.jsx**: 确认 `logs` 状态和 `addLog` 函数定义正常 (热更新缓存问题)
+1. **ExportTab.jsx**: 修复 `htmlLinks` 变量重复声明问题。
+2. **ExportTab.jsx**: 修复复杂 HTML 结构导致 Telegram 粘贴回退为纯文本的问题。
+
 
 ---
 

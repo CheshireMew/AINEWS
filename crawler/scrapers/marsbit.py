@@ -12,7 +12,7 @@ class MarsBitScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取MarsBit的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 点击"只要重要快讯"复选框

@@ -12,7 +12,7 @@ class OdailyScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取Odaily的重要新闻（火焰图标标记）"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 1. 点击"重要快讯"筛选按钮

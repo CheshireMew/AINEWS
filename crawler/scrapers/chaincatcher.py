@@ -12,7 +12,7 @@ class ChainCatcherScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取ChainCatcher的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 1. 点击"只看精选"开关
@@ -118,16 +118,28 @@ class ChainCatcherScraper(BaseScraper):
                     continue
                 processed_urls.add(url)
                 
-                # 5. 提取时间
-                # ChainCatcher 时间通常在列表项底部
-                time_text = await item.evaluate('''
+                # 5. 提取时间 - ChainCatcher有完整的timeattr属性（例如："2025-12-26 18:35:38"）
+                time_str = await item.evaluate('''
                     el => {
-                        const timeEl = el.querySelector('.time') || el.querySelector('.date') || el.querySelector('span[class*="gray"]');
-                        return timeEl ? timeEl.textContent : '';
+                        // 优先使用 timeattr 属性（完整时间戳）
+                        const timeEl = el.querySelector('[timeattr]');
+                        if (timeEl) {
+                            return timeEl.getAttribute('timeattr');
+                        }
+                        // 降级：查找时间文本
+                        const textEl = el.querySelector('.time') || el.querySelector('.date') || el.querySelector('.dateTime');
+                        return textEl ? textEl.textContent : '';
                     }
                 ''')
                 
-                published_at = self.parse_relative_time(time_text) if time_text else datetime.now()
+                # 解析时间
+                if time_str and len(time_str) > 10:  # 完整时间戳格式
+                    try:
+                        published_at = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+                    except:
+                        published_at = self.parse_relative_time(time_str)
+                else:
+                    published_at = self.parse_relative_time(time_str) if time_str else datetime.now()
                 
                 # 6. 增量抓取检查
                 if self.should_stop_scraping(title, url, published_at):
@@ -156,7 +168,7 @@ class ChainCatcherScraper(BaseScraper):
                     'title': title,
                     'content': content,
                     'url': url,
-                    'published_at': published_at,
+                    'published_at': published_at.strftime('%Y-%m-%d %H:%M:%S'),  # 转换为字符串格式
                     'is_marked_important': True,
                     'site_importance_flag': 'selected_class'
                 }

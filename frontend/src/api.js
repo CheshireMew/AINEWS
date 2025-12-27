@@ -143,6 +143,12 @@ export const filterCuratedNews = (params) =>
 export const getAiConfig = () => api.get('/ai/config');
 export const setAiConfig = (config) => api.post('/ai/config', config);
 
+// System API
+export const getSystemTimezone = () => api.get('/system/timezone');
+export const setSystemTimezone = (config) => api.post('/system/timezone', config);
+export const getDailyPushTime = () => api.get('/system/push_time');
+export const setDailyPushTime = (time) => api.post('/system/push_time', { time });
+
 export const getFilteredCurated = (status, page = 1, limit = 50, source = null, keyword = null) =>
     api.get('/curated/filtered', { params: { status, page, limit, source, keyword } });
 
@@ -161,6 +167,13 @@ export const getExportNews = (hours, minScore) => api.get('/curated/export', {
 export const getTelegramConfig = () => api.get('/telegram/config');
 export const setTelegramConfig = (config) => api.post('/telegram/config', config);
 export const testTelegramPush = () => api.post('/telegram/test');
+export const sendNewsToTelegram = (newsIds) => api.post('/telegram/send_news', { news_ids: newsIds });
+export const triggerDailyPush = () => api.post('/telegram/daily_push');
+
+// Analyst API Keys
+export const getAnalystApiKeys = () => api.get('/analyst/keys');
+export const createAnalystApiKey = (keyName, notes) => api.post('/analyst/keys', { key_name: keyName, notes });
+export const deleteAnalystApiKey = (keyId) => api.delete(`/analyst/keys/${keyId}`);
 
 export const getDeepSeekConfig = () => api.get('/deepseek/config');
 export const setDeepSeekConfig = (config) => api.post('/deepseek/config', config);

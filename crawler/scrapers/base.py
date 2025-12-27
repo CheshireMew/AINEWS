@@ -45,6 +45,53 @@ class BaseScraper(ABC):
         if self.playwright:
             await self.playwright.stop()
     
+    async def fetch_page_with_delay(self, url: str, delay_range: tuple = (1, 3), max_retries: int = 3):
+        """
+        带延迟和重试的页面访问（反爬策略）
+        
+        Args:
+            url: 要访问的URL
+            delay_range: 延迟时间范围（秒），如(1, 3)表示1-3秒随机延迟
+            max_retries: 最大重试次数
+            
+        Returns:
+            Page对象，访问成功后可继续操作
+        
+        Raises:
+            Exception: 重试失败后抛出异常
+        """
+        import random
+        import sys
+        sys.path.insert(0, 'E:/Work/Code/AINEWS/backend')
+        from utils.user_agents import get_random_user_agent
+        
+        # 请求前延迟（避免请求过快）
+        delay = random.uniform(*delay_range)
+        await asyncio.sleep(delay)
+        
+        # 重试逻辑  
+        for attempt in range(max_retries):
+            try:
+                # 设置随机User-Agent
+                user_agent = get_random_user_agent()
+                await self.page.set_extra_http_headers({
+                    'User-Agent': user_agent
+                })
+                
+                # 访问页面
+                await self.page.goto(url, wait_until='domcontentloaded')
+                return self.page
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # 指数退避
+                    wait_time = 2 ** attempt
+                    print(f"[反爬] 请求失败，{wait_time}秒后重试 (attempt {attempt + 1}/{max_retries}): {str(e)[:50]}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    print(f"[反爬] 请求最终失败 ({max_retries}次重试后): {url}")
+                    raise
+    
     @abstractmethod
     async def scrape_important_news(self) -> List[Dict]:
         """

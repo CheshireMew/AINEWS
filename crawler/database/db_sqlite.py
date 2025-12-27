@@ -161,6 +161,21 @@ class Database(DatabaseBase):
             )
         ''')
         
+        # 创建 api_keys 表 (多密钥管理)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_name TEXT NOT NULL,
+                api_key TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                enabled BOOLEAN DEFAULT 1,
+                last_used_at TIMESTAMP,
+                notes TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(api_key)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled)')
+        
         # 创建deduplicated_news表（存储已去重的原始数据）
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS deduplicated_news (
@@ -227,9 +242,23 @@ class Database(DatabaseBase):
             print("📊 Migrating: Adding ai_summary column to curated_news")
             cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_summary TEXT")
         
+        # Migration: Add push_status and pushed_at columns if they don't exist
+        try:
+            cursor.execute("SELECT push_status FROM curated_news LIMIT 0")
+        except sqlite3.OperationalError:
+            print("📊 Migrating: Adding push_status column to curated_news")
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN push_status TEXT DEFAULT 'pending'")
+            
+        try:
+            cursor.execute("SELECT pushed_at FROM curated_news LIMIT 0")
+        except sqlite3.OperationalError:
+            print("📊 Migrating: Adding pushed_at column to curated_news")
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN pushed_at TIMESTAMP")
+        
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_source ON curated_news(source_site)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_time ON curated_news(curated_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_ai_status ON curated_news(ai_status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_push_status ON curated_news(push_status)')
 
         # 黑名单表
         cursor.execute('''
@@ -1108,6 +1137,20 @@ class Database(DatabaseBase):
         
 
     # --- System Config Methods ---
+    def get_system_time(self) -> datetime:
+        """
+        获取基于配置时区的当前系统时间
+        默认: Asia/Shanghai
+        """
+        import zoneinfo
+        tz_str = self.get_config('system_timezone') or 'Asia/Shanghai'
+        try:
+            tz = zoneinfo.ZoneInfo(tz_str)
+        except Exception:
+            tz = zoneinfo.ZoneInfo('Asia/Shanghai')
+            
+        return datetime.now(tz)
+
     def get_config(self, key: str) -> Optional[str]:
         """获取系统配置"""
         try:

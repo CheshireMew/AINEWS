@@ -12,7 +12,7 @@ class PANewsScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取PANews的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         await self.page.wait_for_timeout(3000)
         
         # 1. 点击"只看重要"筛选

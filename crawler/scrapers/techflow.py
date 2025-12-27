@@ -12,7 +12,7 @@ class TechFlowScraper(BaseScraper):
     
     async def scrape_important_news(self) -> List[Dict]:
         """抓取深潮的重要新闻"""
-        await self.page.goto(self.base_url)
+        await self.fetch_page_with_delay(self.base_url)
         
         # 点击"只看精选"
         try:
