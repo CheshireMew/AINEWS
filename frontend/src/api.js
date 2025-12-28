@@ -8,7 +8,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
-        // config.headers.Authorization = `Bearer ${token}`; 
+        config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
 });
@@ -51,17 +51,29 @@ api.interceptors.response.use(
     },
     (error) => {
         // 处理错误响应
-        if (error.response && error.response.data) {
-            const errorData = error.response.data;
+        if (error.response) {
+            // Handle 401 Unauthorized
+            if (error.response.status === 401) {
+                // Clear token
+                localStorage.removeItem('token');
+                // Redirect to login if not already there
+                if (!window.location.pathname.includes('/login')) {
+                    window.location.href = '/login';
+                }
+            }
 
-            // 新格式的错误: { success: false, message: "...", error: {...} }
-            if (errorData.success === false) {
-                // 使用自定义消息
-                const customError = new Error(errorData.message || '请求失败');
-                customError.response = error.response;
-                customError.errorType = errorData.error?.type;
-                customError.errorDetails = errorData.error?.details;
-                throw customError;
+            if (error.response.data) {
+                const errorData = error.response.data;
+
+                // 新格式的错误: { success: false, message: "...", error: {...} }
+                if (errorData.success === false) {
+                    // 使用自定义消息
+                    const customError = new Error(errorData.message || '请求失败');
+                    customError.response = error.response;
+                    customError.errorType = errorData.error?.type;
+                    customError.errorDetails = errorData.error?.details;
+                    throw customError;
+                }
             }
         }
 
@@ -70,11 +82,11 @@ api.interceptors.response.use(
     }
 );
 
-export const login = async (password) => {
-    const res = await api.post('/login', { password });
+export const login = async (username, password) => {
+    const res = await api.post('/login', { username, password });
     // 响应拦截器已处理，res.data就是实际数据
-    if (res.data.token) {
-        localStorage.setItem('token', res.data.token);
+    if (res.data.access_token) {
+        localStorage.setItem('token', res.data.access_token);
     }
     return res.data;
 };
@@ -88,8 +100,8 @@ export const deleteNews = (id) => api.delete(`/news/${id}`);
 export const runSpider = (name, items = 10) => api.post(`/spiders/run/${name}`, { items });
 export const cancelScraper = (name) => api.post(`/spiders/stop/${name}`);
 export const updateConfig = (name, { interval, limit }) => api.post(`/spiders/config/${name}`, { interval, limit });
-export const deduplicateNews = (timeWindowHours, action = 'mark') =>
-    api.post('/news/deduplicate', { time_window_hours: timeWindowHours, action });
+export const deduplicateNews = (timeWindowHours, action = 'mark', threshold = 0.50) =>
+    api.post('/news/deduplicate', { time_window_hours: timeWindowHours, action, threshold });
 export const getDeduplicatedNews = (page = 1, limit = 50, source = null, keyword = null) =>
     api.get('/deduplicated/news', { params: { page, limit, source, keyword } });
 export const getDeduplicatedStats = () =>
@@ -144,6 +156,7 @@ export const getAiConfig = () => api.get('/ai/config');
 export const setAiConfig = (config) => api.post('/ai/config', config);
 
 // System API
+export const updateCredentials = (data) => api.post('/system/credentials', data);
 export const getSystemTimezone = () => api.get('/system/timezone');
 export const setSystemTimezone = (config) => api.post('/system/timezone', config);
 export const getDailyPushTime = () => api.get('/system/push_time');
@@ -178,5 +191,13 @@ export const deleteAnalystApiKey = (keyId) => api.delete(`/analyst/keys/${keyId}
 export const getDeepSeekConfig = () => api.get('/deepseek/config');
 export const setDeepSeekConfig = (config) => api.post('/deepseek/config', config);
 export const testDeepSeekConnection = () => api.post('/deepseek/test');
+
+// Auto-Pipeline Config APIs
+export const getAutoPipelineConfig = () => api.get('/config/auto_pipeline');
+export const setAutoPipelineConfig = (config) => api.post('/config/auto_pipeline', config);
+
+// Check Similarity API
+export const checkNewsSimilarity = (newsId1, newsId2) =>
+    api.post('/news/check_similarity', { news_id_1: newsId1, news_id_2: newsId2 });
 
 export default api;

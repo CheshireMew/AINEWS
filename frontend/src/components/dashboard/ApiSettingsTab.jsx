@@ -1,17 +1,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Input, Select, Space, message, Form, Switch, Row, Col, Typography, Table, Modal, Popconfirm } from 'antd';
-import { SaveOutlined, ApiOutlined, SendOutlined, KeyOutlined, CopyOutlined, ReloadOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { SaveOutlined, ApiOutlined, SendOutlined, KeyOutlined, CopyOutlined, ReloadOutlined, PlusOutlined, DeleteOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons';
 import {
     getTelegramConfig, setTelegramConfig, testTelegramPush,
     getDeepSeekConfig, setDeepSeekConfig, testDeepSeekConnection,
     getAnalystApiKeys, createAnalystApiKey, deleteAnalystApiKey,
     getSystemTimezone, setSystemTimezone,
-    getDailyPushTime, setDailyPushTime
+    getDailyPushTime, setDailyPushTime,
+    getAutoPipelineConfig, setAutoPipelineConfig,
+    updateCredentials
 } from '../../api';
 import { GlobalOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { TimePicker } from 'antd';
+import TimeRangeSelect from './TimeRangeSelect';
 
 const { Option } = Select;
 const { Text, Paragraph } = Typography;
@@ -34,12 +37,23 @@ const ApiSettingsTab = () => {
     const [pushTime, setPushTime] = useState('20:00');
     const [loadingTz, setLoadingTz] = useState(false);
 
+    // Auto-Pipeline Config State
+    const [dedupHours, setDedupHours] = useState(2);
+    const [filterHours, setFilterHours] = useState(24);
+    const [aiScoringHours, setAiScoringHours] = useState(10);
+    const [pushHours, setPushHours] = useState(2);
+
+    // Credential Update State
+    const [credentialForm] = Form.useForm();
+    const [credentialLoading, setCredentialLoading] = useState(false);
+
     useEffect(() => {
         fetchDeepSeekConfig();
         fetchTelegramConfig();
         fetchAnalystApiKeys();
         fetchSystemTimezone();
         fetchPushTime();
+        fetchAutoPipelineConfig();
     }, []);
 
     const fetchSystemTimezone = async () => {
@@ -64,12 +78,33 @@ const ApiSettingsTab = () => {
         }
     };
 
+    const fetchAutoPipelineConfig = async () => {
+        try {
+            const res = await getAutoPipelineConfig();
+            if (res.data) {
+                setDedupHours(res.data.dedup_hours || 2);
+                setFilterHours(res.data.filter_hours || 24);
+                setAiScoringHours(res.data.ai_scoring_hours || 10);
+                setPushHours(res.data.push_hours || 2);
+            }
+        } catch (error) {
+            console.error("Failed to fetch auto-pipeline config", error);
+        }
+    };
+
     const handleSaveTimezone = async () => {
         try {
             setLoadingTz(true);
             await setSystemTimezone({ timezone });
             // Save push time
             await setDailyPushTime(pushTime);
+            // Save auto-pipeline config
+            await setAutoPipelineConfig({
+                dedup_hours: dedupHours,
+                filter_hours: filterHours,
+                ai_scoring_hours: aiScoringHours,
+                push_hours: pushHours
+            });
 
             message.success("系统配置已更新");
         } catch (error) {
@@ -178,6 +213,26 @@ const ApiSettingsTab = () => {
         message.success('密钥已复制到剪贴板');
     };
 
+    const handleUpdateCredentials = async (values) => {
+        try {
+            setCredentialLoading(true);
+            await updateCredentials({
+                current_password: values.current_password,
+                new_username: values.new_username,
+                new_password: values.new_password
+            });
+            message.success("账户信息更新成功！请重新登录。");
+            credentialForm.resetFields();
+            // 可以在此强制退出
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        } catch (error) {
+            message.error("更新失败: " + (error.response?.data?.detail || error.message));
+        } finally {
+            setCredentialLoading(false);
+        }
+    };
+
     // Table列定义
     const apiKeyColumns = [
         {
@@ -254,8 +309,8 @@ const ApiSettingsTab = () => {
             <Row gutter={16} style={{ marginBottom: 20 }}>
                 <Col xs={24}>
                     <Card title={<Space><GlobalOutlined /> 系统基础配置</Space>}>
-                        <Form layout="inline">
-                            <Form.Item label="系统时区 (System Timezone)" style={{ minWidth: 300 }}>
+                        <Form layout="inline" style={{ flexWrap: 'wrap' }}>
+                            <Form.Item label="系统时区 (System Timezone)" style={{ marginBottom: 16, minWidth: 300 }}>
                                 <Select
                                     value={timezone}
                                     onChange={setTimezone}
@@ -273,7 +328,7 @@ const ApiSettingsTab = () => {
                                 </Select>
                             </Form.Item>
 
-                            <Form.Item label="每日推送时间 (Daily Push Time)" style={{ minWidth: 300 }}>
+                            <Form.Item label="每日推送时间 (Daily Push Time)" style={{ marginBottom: 16, minWidth: 200 }}>
                                 <TimePicker
                                     value={dayjs(pushTime, 'HH:mm')}
                                     format="HH:mm"
@@ -283,7 +338,7 @@ const ApiSettingsTab = () => {
                                 />
                             </Form.Item>
 
-                            <Form.Item>
+                            <Form.Item style={{ marginBottom: 16 }}>
                                 <Button
                                     type="primary"
                                     icon={<SaveOutlined />}
@@ -293,7 +348,27 @@ const ApiSettingsTab = () => {
                                     保存设置
                                 </Button>
                             </Form.Item>
-                            <div style={{ marginTop: 8, color: '#666', fontSize: 13 }}>
+
+                            {/* 自动化流程配置 - 单独一行 */}
+                            <div style={{ width: '100%', marginBottom: 16 }} />
+
+                            <Form.Item label="去重时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={dedupHours} onChange={setDedupHours} />
+                            </Form.Item>
+
+                            <Form.Item label="过滤时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={filterHours} onChange={setFilterHours} />
+                            </Form.Item>
+
+                            <Form.Item label="AI打分时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={aiScoringHours} onChange={setAiScoringHours} />
+                            </Form.Item>
+
+                            <Form.Item label="推送时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={pushHours} onChange={setPushHours} />
+                            </Form.Item>
+
+                            <div style={{ marginTop: 8, color: '#666', fontSize: 13, width: '100%' }}>
                                 * 此设置将影响所有定时任务（如工作时间判断、每日推送、数据去重范围等）。修改后立即生效。
                             </div>
                         </Form>
@@ -388,19 +463,99 @@ const ApiSettingsTab = () => {
                 </Col>
             </Row>
 
-            {/* 分析师API配置 */}
-            <Row gutter={16} style={{ marginTop: 16 }}>
-                <Col xs={24}>
+
+
+            {/* Account Security and Analyst API (Side by Side) */}
+            <Row gutter={16} style={{ marginBottom: 20 }}>
+                <Col xs={24} lg={12}>
+                    <Card title={<Space><SafetyCertificateOutlined /> 账户安全设置 (Account Security)</Space>} style={{ height: '100%' }}>
+                        <Form
+                            layout="vertical"
+                            form={credentialForm}
+                            onFinish={handleUpdateCredentials}
+                        >
+                            <Form.Item
+                                label="当前密码 (Verify Current Password)"
+                                name="current_password"
+                                rules={[{ required: true, message: '请输入当前密码以验证身份' }]}
+                            >
+                                <Input.Password
+                                    placeholder="验证您的当前密码"
+                                    autoComplete="current-password"
+                                />
+                            </Form.Item>
+
+                            {/* 隐藏的username input，用于辅助浏览器正确识别表单类型 */}
+                            <Input name="username" style={{ display: 'none' }} autoComplete="username" />
+
+                            <Form.Item
+                                label="新用户名 (New Username)"
+                                name="new_username"
+                                tooltip="留空则不修改。修改后需使用新用户名登录。"
+                            >
+                                <Input
+                                    prefix={<UserOutlined />}
+                                    placeholder="不修改请留空"
+                                    autoComplete="off"
+                                />
+                            </Form.Item>
+
+                            <Form.Item
+                                label="新密码 (New Password)"
+                                name="new_password"
+                                rules={[
+                                    { min: 6, message: '密码长度至少6位' }
+                                ]}
+                                tooltip="留空则不修改。修改后需使用新密码登录。"
+                            >
+                                <Input.Password
+                                    placeholder="不修改请留空"
+                                    autoComplete="new-password"
+                                />
+                            </Form.Item>
+
+                            <Form.Item
+                                label="确认新密码 (Confirm New Password)"
+                                name="confirm_password"
+                                dependencies={['new_password']}
+                                rules={[
+                                    ({ getFieldValue }) => ({
+                                        validator(_, value) {
+                                            if (!value || getFieldValue('new_password') === value) {
+                                                return Promise.resolve();
+                                            }
+                                            return Promise.reject(new Error('两次输入的密码不一致!'));
+                                        },
+                                    }),
+                                ]}
+                            >
+                                <Input.Password
+                                    placeholder="再次输入新密码"
+                                    autoComplete="new-password"
+                                />
+                            </Form.Item>
+
+                            <Form.Item>
+                                <Button type="primary" htmlType="submit" loading={credentialLoading} danger block>
+                                    更新账户信息
+                                </Button>
+                            </Form.Item>
+                        </Form>
+                    </Card>
+                </Col>
+
+                <Col xs={24} lg={12}>
                     <Card
                         title={<Space><KeyOutlined /> 分析师API密钥管理</Space>}
-                        style={{ marginBottom: 20 }}
+                        style={{ height: '100%' }}
                         extra={
                             <Button
                                 type="primary"
                                 icon={<PlusOutlined />}
                                 onClick={() => setShowCreateModal(true)}
+                                size="small"
                             >
-                                创建新密钥
+                                新建
                             </Button>
                         }
                     >
@@ -409,20 +564,22 @@ const ApiSettingsTab = () => {
                             columns={apiKeyColumns}
                             rowKey="id"
                             pagination={false}
-                            locale={{ emptyText: '暂无密钥，点击"创建新密钥"添加' }}
+                            locale={{ emptyText: '暂无密钥' }}
+                            scroll={{ x: true }}
+                            size="small"
                         />
                         <div style={{ marginTop: 16, background: '#f5f5f5', padding: '12px', borderRadius: '4px' }}>
                             <Text strong>使用说明：</Text>
                             <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
-                                <li>点击"创建新密钥"为不同用户生成独立密钥</li>
-                                <li>每个密钥可独立删除，不影响其他用户</li>
-                                <li>API端点：<code>GET /api/analyst/news</code></li>
-                                <li>详细文档：查看 <code>API_DOCUMENTATION.md</code></li>
+                                <li>为不同用户生成独立密钥</li>
+                                <li>密钥可独立删除</li>
+                                <li><code>GET /api/analyst/news</code></li>
                             </ul>
                         </div>
                     </Card>
                 </Col>
             </Row>
+
             {/* 创建密钥Modal */}
             <Modal
                 title="创建新API密钥"
@@ -440,7 +597,7 @@ const ApiSettingsTab = () => {
                     <Form.Item
                         label="密钥名称"
                         required
-                        extra="用于标识此密钥的用途或使用者（如：朋友A、测试环境等）"
+                        extra="用于标识此密钥的用途或使用者"
                     >
                         <Input
                             value={newKeyName}

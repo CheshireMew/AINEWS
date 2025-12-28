@@ -11,7 +11,7 @@ const Login = () => {
     const onFinish = async (values) => {
         setLoading(true);
         try {
-            await login(values.password);
+            await login(values.username, values.password);
             message.success('登录成功');
             navigate('/dashboard');
         } catch (error) {
@@ -29,6 +29,16 @@ const Login = () => {
                     initialValues={{ remember: true }}
                     onFinish={onFinish}
                 >
+                    <Form.Item
+                        name="username"
+                        rules={[{ required: true, message: '请输入用户名!' }]}
+                    >
+                        <Input
+                            prefix={<UserOutlined />}
+                            placeholder="Username (admin)"
+                        />
+                    </Form.Item>
+
                     <Form.Item
                         name="password"
                         rules={[{ required: true, message: '请输入管理员密码!' }]}

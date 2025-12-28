@@ -1,0 +1,87 @@
+﻿python : C:\Users\Dy
+lan\AppData\Roaming\
+Python\Python314\sit
+e-packages\jieba\_co
+mpat.py:18: UserWarn
+ing: pkg_resources i
+s deprecated as an A
+PI. See https://setu
+ptools.pypa.io/en/la
+test/pkg_resources.h
+tml. The pkg_resourc
+es package is slated
+ for removal as earl
+y as 2025-11-30. Ref
+rain from using this
+ package or pin to S
+etuptools<81.
+所在位置 行:1 字符: 1
++ python test/simula
+te_full_dedup.py 2>&
+1 | Out-File test/si
+mulate_resu ...
++ ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+~
+    + CategoryInfo  
+            : NotS  
+  pecified: (C:\U   
+ sers\Dylan\...     
+Setuptools<81.:    S
+tring) [], Rem    ot
+eException
+    + FullyQualifie 
+   dErrorId : Nati  
+  veCommandError
+ 
+  import pkg_resourc
+es
+====================================================================================================
+模拟用户操作：全部时间（time_window_hours=0）+ 阈值0.50
+====================================================================================================
+
+获取了 50 条pending新闻
+
+前5条新闻:
+  0. ID=1202: 慢雾：Debot风险钱包用户私钥被盗，黑客目前获利25.5万美元资产
+  1. ID=1197: 过去24小时全网合约爆仓5918.73万美元，主爆空单
+  2. ID=1196: 慢雾余弦：黑客通过Debot风险钱包已盗取25.5万美元资产
+  3. ID=1200: 慢雾余弦：DeBot 相关用户私钥被盗，黑客目前获利 25.5 万美元资产并在持续盗窃
+  4. ID=1190: DeBot：安全钱包地址运行正常，正在跟进并处理部分地址问题
+
+====================================================================================================
+执行LocalDeduplicator.mark_duplicates()
+  - time_window_hours: 0 (全部时间)
+  - similarity_threshold: 0.50
+====================================================================================================
+[LocalDeduplicator] 预计算特征并提取动态停用词...
+[LocalDeduplicator] 完成。发现 31 对重复。
+
+结果分析:
+----------------------------------------------------------------------------------------------------
+发现重复项: 19 条
+
+重复项详情（前10条）:
+
+  ID 1202: 慢雾：Debot风险钱包用户私钥被盗，黑客目前获利25.5万美元资产
+    duplicate_of: 1200 (类型: int)
+Traceback (most rece
+nt call last):
+  File "E:\Work\Code
+\AINEWS\test\simulat
+e_full_dedup.py", li
+ne 75, in <module>
+    print(f"    \u27
+05 指向真实新闻: ID={maste
+r['id']}, {master['t
+itle'][:40]}...")
+    ~~~~~^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 
+'gbk' codec can't en
+code character '\u27
+05' in position 4: i
+llegal multibyte seq
+uence

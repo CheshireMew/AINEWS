@@ -187,6 +187,12 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
             dataIndex: 'title',
             render: (text, record) => <a href={record.source_url} target="_blank" rel="noopener noreferrer">{text}</a>
         },
+        {
+            title: '过滤原因',
+            dataIndex: 'keyword_filter_reason',
+            width: 150,
+            render: (text) => text || '-'
+        },
         { title: '来源', dataIndex: 'source_site', width: 100 },
         {
             title: '发布时间',

@@ -3,6 +3,7 @@ import AIBestTab from '../components/dashboard/AIBestTab';
 import SpiderControlTab from '../components/dashboard/SpiderControlTab';
 import FilterSettingsTab from '../components/dashboard/FilterSettingsTab';
 import NewsManagementTab from '../components/dashboard/NewsManagementTab';
+import DuplicateTreeTab from '../components/dashboard/DuplicateTreeTab';
 import DeduplicatedTab from '../components/dashboard/DeduplicatedTab';
 import CuratedNewsTab from '../components/dashboard/CuratedNewsTab';
 import ApiSettingsTab from '../components/dashboard/ApiSettingsTab';
@@ -15,7 +16,7 @@ import {
 import {
     LogoutOutlined, ReloadOutlined, RobotOutlined,
     DatabaseOutlined, PlayCircleOutlined, PauseCircleOutlined, PlusOutlined,
-    DownloadOutlined
+    DownloadOutlined, AppstoreOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getStats, getNews, runSpider, getSpiders, getSpiderStatus, deleteNews, cancelScraper, updateConfig, deduplicateNews, getDeduplicatedNews, deleteDeduplicatedNews, getBlacklist, addBlacklist, deleteBlacklist, filterNews, exportNews, getCuratedNews, getCuratedStats, deleteCuratedNews, restoreNews, getFilteredDedupNews, getTelegramConfig, setTelegramConfig, testTelegramPush, filterCuratedNews, getFilteredCurated, getDeepSeekConfig, setDeepSeekConfig, testDeepSeekConnection, restoreCuratedNews, getAiConfig, setAiConfig, batchRestoreCurated, clearAllAiStatus, getExportNews } from '../api';
@@ -158,7 +159,8 @@ const Dashboard = () => {
 
     const handleLogout = () => {
         localStorage.removeItem('token');
-        navigate('/login');
+        // 使用强制刷新跳转，避免由浏览器插件导致的路由问题，并彻底清除内存状态
+        window.location.href = '/login';
     };
 
     // 全局计数状态
@@ -444,6 +446,11 @@ const Dashboard = () => {
                                 key: '1',
                                 label: <span><DatabaseOutlined />数据管理 ({globalCounts.news})</span>,
                                 children: <NewsManagementTab spiders={spiders} onShowExport={handleShowExport} />
+                            },
+                            {
+                                key: '1.5',
+                                label: <span><AppstoreOutlined />重复对照</span>,
+                                children: <DuplicateTreeTab spiders={spiders} onShowExport={handleShowExport} />
                             },
                             {
                                 key: '3',

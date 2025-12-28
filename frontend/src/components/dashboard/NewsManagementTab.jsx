@@ -5,33 +5,36 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { getNews, deleteNews } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
+import usePaginationConfig from '../common/usePaginationConfig';
 
 
 
 /**
  * 数据管理Tab组件
- * 用于管理原始新闻数据
+ * 用于管理所有原始新闻数据（平铺展示）
  */
 const NewsManagementTab = ({ spiders, onShowExport }) => {
     // 状态管理
     const [news, setNews] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+    const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
     const [filterSource, setFilterSource] = useState(undefined);
     const [filterKeyword, setFilterKeyword] = useState('');
 
+    // 使用通用分页配置
+    const { getPaginationConfig } = usePaginationConfig(20);
 
     /**
      * 获取新闻数据
      */
-    const fetchNews = async (page = 1, source = filterSource, keyword = filterKeyword) => {
+    const fetchNews = async (page = 1, pageSize = pagination.pageSize, source = filterSource, keyword = filterKeyword) => {
         setLoading(true);
         try {
-            const res = await getNews(page, 10, source, null, keyword);
+            const res = await getNews(page, pageSize, source, null, keyword);
             setNews(res.data.data);
             setPagination({
-                ...pagination,
                 current: page,
+                pageSize: pageSize,
                 total: res.data.total
             });
         } catch (e) {
@@ -48,17 +51,15 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
         try {
             await deleteNews(id);
             message.success('删除成功');
-            fetchNews(pagination.current, filterSource);
+            fetchNews(pagination.current, pagination.pageSize, filterSource, filterKeyword);
         } catch (e) {
             message.error('删除失败');
         }
     };
 
-
-
     // 组件加载时获取数据
     useEffect(() => {
-        fetchNews(1, filterSource);
+        fetchNews(1, pagination.pageSize, filterSource, filterKeyword);
     }, []);
 
     // 表格列定义
@@ -68,18 +69,29 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
             title: '标题',
             dataIndex: 'title',
             ellipsis: true,
-            render: (text, record) => <a href={record.source_url} target="_blank" rel="noopener noreferrer">{text}</a>
+            render: (text, record) => (
+                <div>
+                    <a href={record.source_url} target="_blank" rel="noopener noreferrer">
+                        {text}
+                    </a>
+                    {record.duplicate_of && (
+                        <Tag color="orange" style={{ marginLeft: 8 }}>
+                            重复于ID:{record.duplicate_of}
+                        </Tag>
+                    )}
+                </div>
+            )
         },
         { title: '来源', dataIndex: 'source_site', width: 120 },
         {
             title: '状态',
             dataIndex: 'stage',
             width: 90,
-            render: (stage) => {
-                if (stage === 'duplicate') {
-                    return <Tag color="red">重复</Tag>;
+            render: (stage, record) => {
+                if (record.duplicate_of) {
+                    return <Tag color="orange">重复</Tag>;
                 } else {
-                    return <Tag color="default">原始</Tag>;
+                    return <Tag color="green">原始</Tag>;
                 }
             }
         },
@@ -113,16 +125,16 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
             <NewsToolbar
                 onSearch={(val) => {
                     setFilterKeyword(val);
-                    fetchNews(1, filterSource, val);
+                    fetchNews(1, pagination.pageSize, filterSource, val);
                 }}
                 spiders={spiders}
                 selectedSource={filterSource}
                 onSourceChange={(val) => {
                     setFilterSource(val);
-                    fetchNews(1, val, filterKeyword);
+                    fetchNews(1, pagination.pageSize, val, filterKeyword);
                 }}
                 onExport={() => onShowExport && onShowExport('raw')}
-                onRefresh={() => fetchNews(pagination.current, filterSource, filterKeyword)}
+                onRefresh={() => fetchNews(pagination.current, pagination.pageSize, filterSource, filterKeyword)}
                 loading={loading}
             >
 
@@ -133,10 +145,11 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
                 dataSource={news}
                 rowKey="id"
                 loading={loading}
-                pagination={{
-                    ...pagination,
-                    onChange: (page) => fetchNews(page, filterSource, filterKeyword)
-                }}
+                pagination={getPaginationConfig(
+                    pagination,
+                    (page, pageSize) => fetchNews(page, pageSize, filterSource, filterKeyword),
+                    (page, pageSize) => fetchNews(page, pageSize, filterSource, filterKeyword)
+                )}
                 expandable={{
                     expandedRowRender: record => <NewsExpandedView record={record} />,
                     rowExpandable: record => true,

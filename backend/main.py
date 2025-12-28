@@ -10,11 +10,15 @@ from contextlib import asynccontextmanager
 # if sys.platform == 'win32':
 #     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse  # Added for export
-from pydantic import BaseModel
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field
 from logging import getLogger
+import jwt
+import secrets
+from datetime import datetime, timedelta
 
 logger = getLogger("uvicorn")
 
@@ -90,6 +94,103 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 初始化数据库
 db = Database()
 
+# --- JWT Auth Configuration ---
+# 生产环境应该从环境变量读取 SECRET_KEY
+# 也可以自动生成一个持久化的密钥，或者为了简单每次重启生成一个（会导致重启后Token失效）
+# 这里我们尝试从数据库配置读取，如果没有则生成一个
+SECRET_KEY = db.get_config("jwt_secret_key")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(32)
+    db.set_config("jwt_secret_key", SECRET_KEY)
+
+# 初始化默认凭证
+if not db.get_config("admin_username"):
+    db.set_config("admin_username", "admin")
+if not db.get_config("admin_password"):
+    db.set_config("admin_password", "admin123")
+
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7天过期
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class User(BaseModel):
+    username: str
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+    # Verify username and password against database config
+    db_username = db.get_config("admin_username") or "admin" # Fallback if missing
+    db_password = db.get_config("admin_password") or "admin123"
+    
+    # Note: Passwords should be hashed in production using bcrypt/argon2 (e.g. methods from passlib)
+    # Since we are using system_config (plaintext), we compare directly.
+    # Future improvement: Store hashed password.
+    
+    if token_data.username != db_username:
+        raise credentials_exception
+        
+    return User(username=token_data.username)
+
+class CredentialsUpdate(BaseModel):
+    current_password: str
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
+
+@app.post("/api/system/credentials")
+async def update_credentials(req: CredentialsUpdate, user: User = Depends(get_current_user)):
+    """Update admin credentials"""
+    db_password = db.get_config("admin_password") or "admin123"
+    
+    if req.current_password != db_password:
+        raise HTTPException(
+            status_code=400,
+            detail="当前密码错误"
+        )
+    
+    if req.new_username:
+        if len(req.new_username) < 3:
+            raise HTTPException(status_code=400, detail="用户名长度至少为3个字符")
+        db.set_config("admin_username", req.new_username)
+        
+    if req.new_password:
+        if len(req.new_password) < 6:
+            raise HTTPException(status_code=400, detail="密码长度至少为6个字符")
+        db.set_config("admin_password", req.new_password)
+        
+    return APIResponse.success(message="账户信息已更新")
+
+
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
@@ -133,7 +234,7 @@ async def get_system_timezone():
     return {"timezone": tz}
 
 @app.post("/api/system/timezone")
-async def set_system_timezone(config: SystemTimezoneConfig):
+async def set_system_timezone(config: SystemTimezoneConfig, user: User = Depends(get_current_user)):
     """Set system timezone config"""
     import zoneinfo
     try:
@@ -153,7 +254,7 @@ async def get_push_time():
     return {"time": t}
 
 @app.post("/api/system/push_time")
-async def set_push_time(config: DailyPushTimeConfig):
+async def set_push_time(config: DailyPushTimeConfig, user: User = Depends(get_current_user)):
     """Set daily push time config (HH:MM)"""
     try:
         # Validate format
@@ -163,60 +264,7 @@ async def set_push_time(config: DailyPushTimeConfig):
     except ValueError:
          raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM")
 
-@app.get("/api/news")
-async def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None, keyword: Optional[str] = None):
-    """Get news list with pagination"""
-    try:
-        conn = db.connect()
-        cursor = conn.cursor()
-        offset = (page - 1) * limit
-        
-        query = "SELECT * FROM news WHERE 1=1"
-        params = []
-        
-        if source:
-            query += " AND source_site = ?"
-            params.append(source)
-        
-        if stage:
-            query += " AND stage = ?"
-            params.append(stage)
-        
-        if keyword:
-            query += " AND (title LIKE ? OR content LIKE ?)"
-            term = f"%{keyword}%"
-            params.append(term)
-            params.append(term)
-        
-        # Count total
-        count_query = "SELECT count(*) FROM (" + query + ")"
-        cursor.execute(count_query, params)
-        total_count = cursor.fetchone()[0]
-        
-        # Get data
-        query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        
-        cursor.execute(query, params)
-        columns = [description[0] for description in cursor.description]
-        rows = cursor.fetchall()
-        
-        news_items = []
-        for row in rows:
-            news_items.append(dict(zip(columns, row)))
-            
-        conn.close()
-        
-        return APIResponse.paginated(
-            data=news_items,
-            total=total_count,
-            page=page,
-            limit=limit
-        )
-            
-    except Exception as e:
-        logger.error(f"Error getting news: {e}")
-        return APIResponse.error(message=f"Failed to get news: {str(e)}")
+
 
 
 SCRAPER_STATUS: Dict[str, Dict] = {} 
@@ -228,9 +276,14 @@ class RunScraperRequest(BaseModel):
 class DeduplicateRequest(BaseModel):
     time_window_hours: int = 24
     action: str = 'mark'  # 'mark' or 'delete'
+    threshold: float = 0.50 # 相似度阈值
+
+class CheckSimilarityRequest(BaseModel):
+    news_id_1: int
+    news_id_2: int
 
 @app.post("/api/spiders/stop/{name}")
-async def stop_scraper(name: str):
+async def stop_scraper(name: str, user: User = Depends(get_current_user)):
     """Stop a running scraper task"""
     if name in RUNNING_TASKS:
         task = RUNNING_TASKS[name]
@@ -440,8 +493,8 @@ async def deduplicate_news(req: DeduplicateRequest):
             }
         
         # 2. 使用LocalDeduplicator找出重复
-        print("正在调用 LocalDeduplicator (本地去重算法)...")
-        dedup = LocalDeduplicator(similarity_threshold=0.50, time_window_hours=req.time_window_hours)
+        print(f"正在调用 LocalDeduplicator (本地去重算法) [阈值: {req.threshold}]...")
+        dedup = LocalDeduplicator(similarity_threshold=req.threshold, time_window_hours=req.time_window_hours)
         
         # 记录开始前的内存状态或简单日志
         news_list = dedup.mark_duplicates(news_list)
@@ -453,35 +506,41 @@ async def deduplicate_news(req: DeduplicateRequest):
         duplicate_groups = {}
         
         for dup in duplicates:
-            master_idx = dup.get('duplicate_of')
-            if master_idx is not None and master_idx < len(news_list):
-                master = news_list[master_idx]
-                master_id = master['id']
+            # 🔧 FIX: duplicate_of现在直接是新闻ID，不再是列表索引
+            master_id = dup.get('duplicate_of')
+            if master_id is None:
+                continue
+            
+            # 获取主新闻信息用于显示（可选）
+            master = next((n for n in news_list if n['id'] == master_id), None)
+            if not master:
+                print(f"⚠️ 警告: 找不到主新闻 ID={master_id}")
+                continue
                 
-                # print(f"  ❌ 重复: [ID:{dup['id']}] {dup['title'][:30]}...")
-                # print(f"     → 归并到: [ID:{master_id}] {master['title'][:30]}...")
-                
-                if master_id not in duplicate_groups:
-                    duplicate_groups[master_id] = {
-                        'master': {
-                            'id': master['id'],
-                            'title': master['title'],
-                            'source': master['source_site']
-                        },
-                        'duplicates': []
-                    }
-                
-                duplicate_groups[master_id]['duplicates'].append({
-                    'id': dup['id'],
-                    'title': dup['title'],
-                    'source': dup['source_site']
-                })
-                
-                # 执行操作
-                if req.action == 'mark':
-                    db.mark_as_duplicate(dup['id'], master_id)
-                elif req.action == 'delete':
-                    db.delete_news(dup['id'])
+            # print(f"  ❌ 重复: [ID:{dup['id']}] {dup['title'][:30]}...")
+            # print(f"     → 归并到: [ID:{master_id}] {master['title'][:30]}...")
+            
+            if master_id not in duplicate_groups:
+                duplicate_groups[master_id] = {
+                    'master': {
+                        'id': master['id'],
+                        'title': master['title'],
+                        'source': master['source_site']
+                    },
+                    'duplicates': []
+                }
+            
+            duplicate_groups[master_id]['duplicates'].append({
+                'id': dup['id'],
+                'title': dup['title'],
+                'source': dup['source_site']
+            })
+            
+            # 执行操作
+            if req.action == 'mark':
+                db.mark_as_duplicate(dup['id'], master_id)
+            elif req.action == 'delete':
+                db.delete_news(dup['id'])
         
         # 归档非重复的新闻到deduplicated_news
         archived_count = 0  # 初始化为 0
@@ -508,6 +567,50 @@ async def deduplicate_news(req: DeduplicateRequest):
         import traceback
         logger.error(f"Deduplication error: {e}")
         logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/news/check_similarity")
+async def check_news_similarity(req: CheckSimilarityRequest):
+    """检测两条新闻的相似度"""
+    try:
+        import sys
+        sys.path.insert(0, 'crawler')
+        from filters.local_deduplicator import LocalDeduplicator
+        
+        db = Database()
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 获取两条新闻
+        cursor.execute("SELECT id, title FROM news WHERE id IN (?, ?)", (req.news_id_1, req.news_id_2))
+        rows = cursor.fetchall()
+        
+        if len(rows) < 2:
+            conn.close()
+            raise HTTPException(status_code=404, detail="找不到指定的新闻")
+        
+        news_1 = {'id': rows[0][0], 'title': rows[0][1]}
+        news_2 = {'id': rows[1][0], 'title': rows[1][1]}
+        
+        conn.close()
+        
+        # 计算相似度
+        deduplicator = LocalDeduplicator()
+        similarity = deduplicator.calculate_similarity(news_1['title'], news_2['title'])
+        
+        # 使用去重器的阈值，而不是硬编码
+        threshold = deduplicator.similarity_threshold
+        is_duplicate = similarity >= threshold
+        
+        return {
+            "news_1": news_1,
+            "news_2": news_2,
+            "similarity": round(similarity, 4),
+            "threshold": threshold,
+            "is_duplicate": is_duplicate
+        }
+        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== 辅助函数 ====================
@@ -873,9 +976,13 @@ async def auto_deduplication():
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 获取最近2小时stage='raw'的新闻
+    # 从配置读取时间范围，默认2小时
+    dedup_hours = int(db.get_config("auto_dedup_hours") or 2)
+    logger.info(f"🔄 [Auto-Dedup] Using time range: {dedup_hours} hours")
+    
+    # 获取最近N小时stage='raw'的新闻
     from datetime import datetime, timedelta
-    cutoff_time = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff_time = (datetime.now() - timedelta(hours=dedup_hours)).strftime('%Y-%m-%d %H:%M:%S')
     
     cursor.execute("""
         SELECT id, title, content, source_url, source_site, published_at, scraped_at
@@ -952,15 +1059,19 @@ async def auto_keyword_filter():
     
     db = Database()
     
+    # 从配置读取时间范围，默认24小时
+    filter_hours = int(db.get_config("auto_filter_hours") or 24)
+    logger.info(f"🔍 [Auto-Filter] Using time range: {filter_hours} hours")
+    
     try:
         # 调用数据库内置的过滤方法
         # 这个方法会:
         # 1. 自动从 keyword_blacklist 表加载规则
         # 2. 扫描 deduplicated_news 表中 deduplicated 状态的新闻
         # 3. 将通过的新闻移入 curated_news，被过滤的标记为 filtered
-        # 4. 默认扫描过去24小时的数据（足够覆盖15分钟的周期）
+        # 4. 使用配置的时间范围扫描数据
         
-        result = db.filter_news_by_blacklist(time_range_hours=24)
+        result = db.filter_news_by_blacklist(time_range_hours=filter_hours)
         
         scanned = result.get('scanned', 0)
         filtered = result.get('filtered', 0)
@@ -991,14 +1102,28 @@ async def auto_ai_scoring():
         logger.warning("⚠️ [Auto-AI] No API key configured, skipping AI scoring")
         return
     
-    # 获取未打分数据
+    # 获取未打分数据，只处理 10 小时内的新闻
     conn = db.connect()
     cursor = conn.cursor()
     
+    # 计算时间前的时间（北京时间）
+    from datetime import timedelta
+    
+    # 从配置读取时间范围，默认10小时
+    ai_hours = int(db.get_config("auto_ai_scoring_hours") or 10)
+    
+    current_time = db.get_system_time()
+    time_ago = current_time - timedelta(hours=ai_hours)
+    time_ago_str = time_ago.strftime('%Y-%m-%d %H:%M:%S')
+    
+    logger.info(f"🤖 [Auto-AI] Using time range: {ai_hours} hours")
+    logger.info(f"🤖 [Auto-AI] Filtering news published after: {time_ago_str} (Beijing Time)")
+    
     cursor.execute("""
         SELECT COUNT(*) FROM curated_news 
-        WHERE ai_status IS NULL OR ai_status = '' OR ai_status = 'pending'
-    """)
+        WHERE (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')
+        AND published_at >= ?
+    """, (time_ago_str,))
     unscored_count = cursor.fetchone()[0]
     
     logger.info(f"🤖 [Auto-AI] Found {unscored_count} items to score")
@@ -1015,9 +1140,10 @@ async def auto_ai_scoring():
     for offset in range(0, unscored_count, batch_size):
         cursor.execute("""
             SELECT id, title FROM curated_news 
-            WHERE ai_status IS NULL OR ai_status = '' OR ai_status = 'pending'
+            WHERE (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')
+            AND published_at >= ?
             LIMIT ? OFFSET ?
-        """, (batch_size, offset))
+        """, (time_ago_str, batch_size, offset))
         
         rows = cursor.fetchall()
         if not rows:
@@ -1039,11 +1165,17 @@ async def auto_ai_scoring():
                     tag = item.get('tag', '')
                     
                     status = 'approved' if score >= 5 else 'rejected'
-                    summary = f"{score}分 {reason} #{tag}"
+                    # 组合显示格式：分数-理由 #标签 (与前端 AIFilterTab.jsx 解析逻辑一致)
+                    if tag:
+                        summary = f"{score}分-{reason} #{tag}"
+                    elif reason:
+                        summary = f"{score}分-{reason}"
+                    else:
+                        summary = f"{score}分"
                     
                     cursor.execute("""
                         UPDATE curated_news 
-                        SET ai_status = ?, ai_summary = ?
+                        SET ai_status = ?, ai_explanation = ?
                         WHERE id = ?
                     """, (status, summary, item_id))
                     
@@ -1080,17 +1212,31 @@ async def auto_telegram_push():
         return
     
     # 获取待推送新闻：ai_status='approved' AND (push_status IS NULL OR push_status='pending')
+    # 并且只推送北京时间发布时间N小时内的新闻
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 从ai_summary中提取分数并筛选≦5分
+    # 从配置读取时间范围，默认2小时
+    push_hours = int(db.get_config("auto_push_hours") or 2)
+    
+    # 计算时间前的时间（北京时间）
+    from datetime import timedelta
+    current_time = db.get_system_time()
+    time_ago = current_time - timedelta(hours=push_hours)
+    time_ago_str = time_ago.strftime('%Y-%m-%d %H:%M:%S')
+    
+    logger.info(f"📤 [Auto-Push] Using time range: {push_hours} hours")
+    logger.info(f"📤 [Auto-Push] Filtering news published after: {time_ago_str} (Beijing Time)")
+    
+    # 从ai_explanation中提取分数并筛选≥5分，同时只推送N小时内的新闻
     cursor.execute("""
-        SELECT id, title, source_url, content, ai_summary
+        SELECT id, title, source_url, content, ai_explanation
         FROM curated_news
         WHERE ai_status = 'approved'
         AND (push_status IS NULL OR push_status = 'pending')
-        ORDER BY curated_at DESC
-    """)
+        AND published_at >= ?
+        ORDER BY published_at DESC
+    """, (time_ago_str,))
     
     all_news = cursor.fetchall()
     
@@ -1098,7 +1244,7 @@ async def auto_telegram_push():
     to_push = []
     for news in all_news:
         ai_summary = news[4] or ""
-        # 尝试从summary中提取分数（格式：8分 xxx）
+        # 尝试从summary中提取分数（格式：8分-xxx）
         try:
             score_str = ai_summary.split('分')[0].strip()
             score = int(score_str)
@@ -1198,7 +1344,7 @@ async def lifespan(app: FastAPI):
 app.router.lifespan_context = lifespan
 
 @app.post("/api/spiders/run/{name}")
-async def run_spider(name: str, background_tasks: BackgroundTasks, req: RunScraperRequest):
+async def run_spider(name: str, background_tasks: BackgroundTasks, req: RunScraperRequest, user: User = Depends(get_current_user)):
     if name not in SCRAPER_MAP:
         raise HTTPException(status_code=404, detail="Scraper not found")
     
@@ -1252,41 +1398,48 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         conn = db.connect()
         cursor = conn.cursor()
         offset = (page - 1) * limit
+        print(f"DEBUG: get_news called with stage={stage}")
         
-        query = "SELECT * FROM news WHERE 1=1"
+        # Modified query to include master news info for duplicates
+        query = """
+            SELECT n.*, m.title as master_title, m.id as master_id_ref
+            FROM news n
+            LEFT JOIN news m ON n.duplicate_of = m.id
+            WHERE 1=1
+        """
         params = []
         
         if source:
-            query += " AND source_site = ?"
+            query += " AND n.source_site = ?"
             params.append(source)
         
         if stage:
-            query += " AND stage = ?"
+            query += " AND n.stage = ?"
             params.append(stage)
         
         if keyword:
-            query += " AND (title LIKE ? OR content LIKE ?)"
+            query += " AND (n.title LIKE ? OR n.content LIKE ?)"
             term = f"%{keyword}%"
             params.append(term)
             params.append(term)
         
-        query += " ORDER BY published_at DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY n.published_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         
         cursor.execute(query, params)
         rows = cursor.fetchall()
         
         # Get total count
-        count_query = "SELECT count(*) FROM news WHERE 1=1"
+        count_query = "SELECT count(*) FROM news n WHERE 1=1"
         count_params = []
         if source:
-            count_query += " AND source_site = ?"
+            count_query += " AND n.source_site = ?"
             count_params.append(source)
         if stage:
-            count_query += " AND stage = ?"
+            count_query += " AND n.stage = ?"
             count_params.append(stage)
         if keyword:
-            count_query += " AND (title LIKE ? OR content LIKE ?)"
+            count_query += " AND (n.title LIKE ? OR n.content LIKE ?)"
             term = f"%{keyword}%"
             count_params.append(term)
             count_params.append(term)
@@ -1296,8 +1449,17 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         
         conn.close()
         
+        results = []
+        for row in rows:
+            item = dict(row)
+            # Ensure master_title is present even if null
+            if 'master_title' not in item:
+                # This should not happen if query works
+                pass 
+            results.append(item)
+        
         return APIResponse.paginated(
-            data=[dict(row) for row in rows],
+            data=results,
             total=total,
             page=page,
             limit=limit
@@ -1306,7 +1468,7 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         raise DatabaseError(f"查询新闻失败: {str(e)}")
 
 @app.delete("/api/news/{news_id}")
-def delete_news(news_id: int):
+def delete_news(news_id: int, user: User = Depends(get_current_user)):
     """Delete a news item"""
     success = db.delete_news(news_id)
     if success:
@@ -1331,7 +1493,7 @@ def get_deduplicated_stats():
     return APIResponse.success(data=stats, message="统计查询成功")
 
 @app.delete("/api/deduplicated/news/{news_id}")
-def delete_deduplicated_news(news_id: int):
+def delete_deduplicated_news(news_id: int, user: User = Depends(get_current_user)):
     """删除已去重数据"""
     success = db.delete_deduplicated_news(news_id)
     if success:
@@ -1339,14 +1501,14 @@ def delete_deduplicated_news(news_id: int):
     raise NotFoundError("数据不存在或删除失败")
 
 @app.post("/api/deduplicated/batch_restore_all")
-async def batch_restore_all_deduplicated():
+async def batch_restore_all_deduplicated(user: User = Depends(get_current_user)):
     """批量还原所有去重数据到 raw 状态"""
     db_instance = Database()
     try:
         conn = db_instance.connect()
         cursor = conn.cursor()
         
-        # 查询所有 deduplicated_news 记录（不限 stage）
+        # 查询所有 deduplicated_news 记录
         cursor.execute("""
             SELECT id, original_news_id 
             FROM deduplicated_news
@@ -1370,27 +1532,41 @@ async def batch_restore_all_deduplicated():
             # 删除所有 deduplicated_news 记录
             cursor.execute("DELETE FROM deduplicated_news")
             
-            # 同时删除 curated_news 中对应的记录（如果存在）
+            # 删除 curated_news 中对应的记录，但保留已 AI 打标（approved/rejected）的数据
             if news_ids:
                 cursor.execute(f"""
                     DELETE FROM curated_news 
                     WHERE original_news_id IN ({placeholders})
+                    AND (ai_status IS NULL OR ai_status NOT IN ('approved', 'rejected'))
                 """, news_ids)
-            
-            conn.commit()
         
+        # ----------------------------------------------------------------
+        # 新增：同时重置都被标记为 Duplicate 的新闻 (真正的"撤销去重")
+        # ----------------------------------------------------------------
+        cursor.execute("""
+            UPDATE news 
+            SET stage = 'pending', 
+                is_duplicate = 0, 
+                duplicate_of = NULL
+            WHERE stage = 'duplicate'
+        """)
+        reset_duplicates_count = cursor.rowcount
+            
+        conn.commit()
         conn.close()
         
+        total_restored = processed_count + reset_duplicates_count
+        
         return APIResponse.success(
-            data={"restored_count": processed_count},
-            message=f"成功还原 {processed_count} 条数据到原始状态，可重新去重"
+            data={"restored_count": total_restored, "archived_restored": processed_count, "duplicates_reset": reset_duplicates_count},
+            message=f"成功还原 {processed_count} 条归档数据，并重置了 {reset_duplicates_count} 条重复数据"
         )
     except Exception as e:
         logger.error(f"批量还原去重数据失败: {e}")
         raise DatabaseError(f"批量还原失败: {str(e)}")
 
 @app.post("/api/filtered/batch_restore_all")
-async def batch_restore_all_filtered():
+async def batch_restore_all_filtered(user: User = Depends(get_current_user)):
     """批量还原已过滤和已精选的数据，重新执行本地过滤"""
     db_instance = Database()
     try:
@@ -1442,7 +1618,7 @@ def get_curated_stats_api():
     return APIResponse.success(data=stats, message="统计查询成功")
 
 @app.delete("/api/curated/news/{news_id}")
-def delete_curated_news(news_id: int):
+def delete_curated_news(news_id: int, user: User = Depends(get_current_user)):
     """删除精选数据"""
     success = db.delete_curated_news(news_id)
     if success:
@@ -1453,7 +1629,7 @@ class RestoreRequest(BaseModel):
     source_table: str = 'deduplicated_news'
 
 @app.post("/api/news/restore/{news_id}")
-def restore_news_api(news_id: int, req: RestoreRequest):
+def restore_news_api(news_id: int, req: RestoreRequest, user: User = Depends(get_current_user)):
     """还原被过滤的新闻"""
     success = db.restore_news(news_id, req.source_table)
     if success:
@@ -1480,7 +1656,7 @@ def get_ai_config():
     )
 
 @app.post("/api/ai/config")
-def set_ai_config(config: AIConfig):
+def set_ai_config(config: AIConfig, user: User = Depends(get_current_user)):
     """设置AI配置"""
     if config.prompt is not None:
         db.set_config("ai_filter_prompt", config.prompt)
@@ -1490,7 +1666,7 @@ def set_ai_config(config: AIConfig):
 
 
 @app.post("/api/curated/ai_filter")
-async def ai_filter_curated(req: AIFilterRequest):
+async def ai_filter_curated(req: AIFilterRequest, user: User = Depends(get_current_user)):
     """执行AI筛选:筛选精选数据中的新闻标题"""
     db = Database()
     
@@ -1633,7 +1809,7 @@ async def ai_filter_curated(req: AIFilterRequest):
 
 
 @app.post("/api/curated/batch_restore")
-async def batch_restore_rejected():
+async def batch_restore_rejected(user: User = Depends(get_current_user)):
     """批量还原所有被拒绝的数据"""
     db = Database()
     try:
@@ -1665,7 +1841,7 @@ async def batch_restore_rejected():
 
 
 @app.post("/api/curated/clear_all_ai_status")
-async def clear_all_ai_status():
+async def clear_all_ai_status(user: User = Depends(get_current_user)):
     """清空所有 AI 筛选状态"""
     db = Database()
     try:
@@ -1825,9 +2001,8 @@ class AddBlacklistRequest(BaseModel):
     match_type: str = 'contains'
 
 @app.post("/api/blacklist")
-def add_blacklist(req: AddBlacklistRequest):
+def add_blacklist(req: AddBlacklistRequest, user: User = Depends(get_current_user)):
     """添加黑名单关键词"""
-    db = Database()
     success = db.add_blacklist_keyword(req.keyword, req.match_type)
     if success:
         return APIResponse.success(message="添加成功")
@@ -1841,24 +2016,65 @@ def delete_blacklist(id: int):
         return APIResponse.success(message="删除成功")
     raise NotFoundError("删除失败")
 
+# --- Auto-Pipeline Config APIs ---
+
+class AutoPipelineConfigRequest(BaseModel):
+    dedup_hours: int = Field(ge=1, le=72, description="去重时间范围（小时）")
+    filter_hours: int = Field(ge=1, le=72, description="过滤时间范围（小时）")
+    ai_scoring_hours: int = Field(ge=1, le=72, description="AI打分时间范围（小时）")
+    push_hours: int = Field(ge=1, le=72, description="推送时间范围（小时)")
+
+@app.get("/api/config/auto_pipeline")
+async def get_auto_pipeline_config():
+    """获取自动化流程配置"""
+    return APIResponse.success(data={
+        "dedup_hours": int(db.get_config("auto_dedup_hours") or 2),
+        "filter_hours": int(db.get_config("auto_filter_hours") or 24),
+        "ai_scoring_hours": int(db.get_config("auto_ai_scoring_hours") or 10),
+        "push_hours": int(db.get_config("auto_push_hours") or 2),
+    })
+
+@app.post("/api/config/auto_pipeline")
+async def set_auto_pipeline_config(req: AutoPipelineConfigRequest, user: User = Depends(get_current_user)):
+    """设置自动化流程配置"""
+    db.set_config("auto_dedup_hours", str(req.dedup_hours))
+    db.set_config("auto_filter_hours", str(req.filter_hours))
+    db.set_config("auto_ai_scoring_hours", str(req.ai_scoring_hours))
+    db.set_config("auto_push_hours", str(req.push_hours))
+    logger.info(f"Auto-pipeline config updated: dedup={req.dedup_hours}h, filter={req.filter_hours}h, AI={req.ai_scoring_hours}h, push={req.push_hours}h")
+    return APIResponse.success(message="配置已保存")
+
 class FilterRequest(BaseModel):
     time_range_hours: int = 24
 
 @app.post("/api/news/filter")
-def filter_news(req: FilterRequest):
+def filter_news(req: FilterRequest, user: User = Depends(get_current_user)):
     """根据黑名单执行过滤"""
     result = db.filter_news_by_blacklist(req.time_range_hours)
     return APIResponse.success(data={"stats": result})
 
 class LoginRequest(BaseModel):
+    username: str
     password: str
 
-@app.post("/api/login")
-def login(req: LoginRequest):
-    # Simple password check
-    if req.password == "admin123": # Default password
-        return APIResponse.success(data={"token": "valid-session"}, message="Login successful")
-    raise AuthenticationError("Invalid password")
+@app.post("/api/login", response_model=Token)
+async def login_for_access_token(req: LoginRequest):
+    # Check credentials against database
+    db_username = db.get_config("admin_username") or "admin"
+    db_password = db.get_config("admin_password") or "admin123"
+    
+    if req.username != db_username or req.password != db_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": db_username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 # --- Telegram Endpoints ---
 class TelegramConfig(BaseModel):
@@ -1879,7 +2095,7 @@ def get_telegram_config_api():
     })
 
 @app.post("/api/telegram/config")
-def set_telegram_config_api(config: TelegramConfig):
+def set_telegram_config_api(config: TelegramConfig, user: User = Depends(get_current_user)):
     """设置Telegram配置"""
     db.set_config("telegram_bot_token", config.bot_token)
     db.set_config("telegram_chat_id", config.chat_id)
@@ -1887,7 +2103,7 @@ def set_telegram_config_api(config: TelegramConfig):
     return APIResponse.success(message="配置已保存")
 
 @app.post("/api/telegram/test")
-async def test_telegram_push():
+async def test_telegram_push(user: User = Depends(get_current_user)):
     """Test Telegram Push"""
     db = Database()
     token = db.get_config("telegram_bot_token")
@@ -1917,7 +2133,7 @@ async def test_telegram_push():
     return APIResponse.success(message="测试消息发送成功")
 
 @app.post("/api/telegram/send_news")
-async def send_news_to_telegram(request: TelegramSendRequest):
+async def send_news_to_telegram(request: TelegramSendRequest, user: User = Depends(get_current_user)):
     """发送选中的新闻到Telegram"""
     db = Database()
     
@@ -2046,7 +2262,7 @@ def verify_analyst_api_key(api_key: str) -> bool:
     return result is not None
 
 @app.post("/api/analyst/keys")
-async def create_api_key(request: ApiKeyCreate):
+async def create_api_key(request: ApiKeyCreate, user: User = Depends(get_current_user)):
     """创建新的API密钥"""
     db = Database()
     
@@ -2112,7 +2328,7 @@ async def get_api_keys():
     return APIResponse.success(data=keys)
 
 @app.delete("/api/analyst/keys/{key_id}")
-async def delete_api_key(key_id: int):
+async def delete_api_key(key_id: int, user: User = Depends(get_current_user)):
     """删除API密钥"""
     db = Database()
     conn = db.connect()
@@ -2240,7 +2456,7 @@ def get_deepseek_config_api():
     })
 
 @app.post("/api/deepseek/config")
-def set_deepseek_config_api(config: DeepSeekConfig):
+def set_deepseek_config_api(config: DeepSeekConfig, user: User = Depends(get_current_user)):
     """设置DeepSeek配置"""
     db.set_config("llm_api_key", config.api_key)
     db.set_config("llm_base_url", config.base_url)
@@ -2248,7 +2464,7 @@ def set_deepseek_config_api(config: DeepSeekConfig):
     return APIResponse.success(message="配置已保存")
 
 @app.post("/api/deepseek/test")
-async def test_deepseek_connection_api():
+async def test_deepseek_connection_api(user: User = Depends(get_current_user)):
     """Test DeepSeek/LLM Connection"""
     db = Database()
     api_key = db.get_config("llm_api_key")

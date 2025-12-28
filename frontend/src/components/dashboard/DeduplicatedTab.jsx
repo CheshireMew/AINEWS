@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Table, Button, Select, Space, message, Popconfirm } from 'antd';
+import { Table, Button, Select, Space, message, Popconfirm, InputNumber } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { getDeduplicatedNews, restoreNews, deduplicateNews, deleteDeduplicatedNews, batchRestoreDeduplicated } from '../../api';
 import NewsExpandedView from './NewsExpandedView';
@@ -23,7 +23,27 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
 
     // Deduplication controls
     const [dedupTimeRange, setDedupTimeRange] = useState(8);
+    // Load from localStorage or default to 0.50
+    const [threshold, setThreshold] = useState(() => {
+        try {
+            const saved = localStorage.getItem('dedup_threshold');
+            if (saved !== null) {
+                const parsed = parseFloat(saved);
+                if (!isNaN(parsed)) {
+                    return parsed;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to load threshold from localStorage', e);
+        }
+        return 0.50;
+    });
     const [deduplicating, setDeduplicating] = useState(false);
+
+    // Save to localStorage whenever threshold changes
+    useEffect(() => {
+        localStorage.setItem('dedup_threshold', threshold);
+    }, [threshold]);
 
     /**
      * 手动去重
@@ -31,7 +51,7 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     const handleDeduplicate = async () => {
         setDeduplicating(true);
         try {
-            const res = await deduplicateNews(dedupTimeRange, 'mark');
+            const res = await deduplicateNews(dedupTimeRange, 'mark', threshold);
             message.success(`去重完成！标记了 ${res.data.stats.duplicates_processed} 条重复新闻, 归档了 ${res.data.stats.archived_count} 条`);
             // 去重会移动数据到本表，刷新列表
             fetchDedupNews(1, dedupFilterSource);
@@ -101,8 +121,15 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     const handleBatchRestore = async () => {
         try {
             const res = await batchRestoreDeduplicated();
-            message.success(`批量还原成功！还原了 ${res.data.restored_count} 条数据`);
+            message.success({
+                content: `批量还原成功！还原了 ${res.data.restored_count} 条数据。请切换到"重复对照"Tab刷新查看。`,
+                duration: 5
+            });
             fetchDedupNews(1);
+            // 触发页面刷新提示
+            setTimeout(() => {
+                message.info('建议刷新页面（F5）以查看最新数据', 3);
+            }, 2000);
         } catch (e) {
             message.error('批量还原失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -187,6 +214,16 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
                 loading={loadingDedup}
             >
                 <Space>
+                    <span>相似度阈值:</span>
+                    <InputNumber
+                        min={0.1}
+                        max={1.0}
+                        step={0.05}
+                        value={threshold}
+                        onChange={setThreshold}
+                        style={{ width: 70 }}
+                    />
+                    <div style={{ width: 16, display: 'inline-block' }} /> {/* Spacer */}
                     <span>去重范围:</span>
                     <TimeRangeSelect value={dedupTimeRange} onChange={setDedupTimeRange} />
                     <Button
@@ -200,7 +237,7 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
                 <div style={{ borderLeft: '1px solid #d9d9d9', height: 24, margin: '0 8px', display: 'inline-block', verticalAlign: 'middle' }} />
                 <Popconfirm
                     title="还原已去重数据"
-                    description="确定要还原所有已处理的去重数据吗？这将把数据还原到 news 表的 'raw' 状态，并删除去重记录和精选记录。"
+                    description="确定要还原已处理的去重数据吗？这将把数据还原到 news 表的 'raw' 状态。（注：AI 筛选/精选记录将被保留，不会丢失已打好的标签）"
                     onConfirm={handleBatchRestore}
                     okText="确定"
                     cancelText="取消"

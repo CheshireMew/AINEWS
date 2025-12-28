@@ -203,6 +203,12 @@ class Database(DatabaseBase):
             print("Migrating: Adding is_whitelist_restored column to deduplicated_news")
             cursor.execute("ALTER TABLE deduplicated_news ADD COLUMN is_whitelist_restored BOOLEAN DEFAULT FALSE")
         
+        # Check and add keyword_filter_reason column if it doesn't exist (Migration)
+        try:
+            cursor.execute("SELECT keyword_filter_reason FROM deduplicated_news LIMIT 0")
+        except sqlite3.OperationalError:
+            print("Migrating: Adding keyword_filter_reason column to deduplicated_news")
+            cursor.execute("ALTER TABLE deduplicated_news ADD COLUMN keyword_filter_reason TEXT")
         
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_deduplicated_source ON deduplicated_news(source_site)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_deduplicated_time ON deduplicated_news(deduplicated_at)')
@@ -241,6 +247,13 @@ class Database(DatabaseBase):
         except sqlite3.OperationalError:
             print("📊 Migrating: Adding ai_summary column to curated_news")
             cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_summary TEXT")
+        
+        # Migration: Add ai_explanation column (for AI filter reason with tag)
+        try:
+            cursor.execute("SELECT ai_explanation FROM curated_news LIMIT 0")
+        except sqlite3.OperationalError:
+            print("📊 Migrating: Adding ai_explanation column to curated_news")
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_explanation TEXT")
         
         # Migration: Add push_status and pushed_at columns if they don't exist
         try:
@@ -453,7 +466,7 @@ class Database(DatabaseBase):
                     SELECT id, title, content, source_site, source_url, published_at, scraped_at,
                            is_marked_important, site_importance_flag, stage, type
                     FROM news
-                    ORDER BY scraped_at DESC
+                    ORDER BY published_at DESC
                 ''')
             else:
                 threshold = datetime.now() - timedelta(hours=hours)
@@ -464,7 +477,7 @@ class Database(DatabaseBase):
                            is_marked_important, site_importance_flag, stage, type
                     FROM news
                     WHERE scraped_at >= ?
-                    ORDER BY scraped_at DESC
+                    ORDER BY published_at DESC
                 ''', (threshold_str,))
             
             
@@ -662,31 +675,38 @@ class Database(DatabaseBase):
     # --- Blacklist Methods ---
     def add_blacklist_keyword(self, keyword: str, match_type: str = 'contains') -> bool:
         """添加黑名单关键词"""
+        conn = None
         try:
             conn = self.connect()
             cursor = conn.cursor()
             cursor.execute('INSERT INTO keyword_blacklist (keyword, match_type) VALUES (?, ?)', (keyword, match_type))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
         except Exception as e:
             print(f"添加关键词失败: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def remove_blacklist_keyword(self, id: int) -> bool:
         """删除黑名单关键词"""
+        conn = None
         try:
             conn = self.connect()
             cursor = conn.cursor()
             cursor.execute('DELETE FROM keyword_blacklist WHERE id = ?', (id,))
+            affected_rows = cursor.rowcount
             conn.commit()
-            conn.close()
-            return cursor.rowcount > 0
+            return affected_rows > 0
         except Exception as e:
             print(f"删除关键词失败: {e}")
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def get_blacklist_keywords(self):
         """获取所有黑名单关键词"""
@@ -718,7 +738,10 @@ class Database(DatabaseBase):
             else:
                 start_time = (datetime.now() - timedelta(hours=time_range_hours)).strftime('%Y-%m-%d %H:%M:%S')
             
+            
             conn = self.connect()
+            # Set row_factory for dict-like access BEFORE executing query
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
             # 获取待扫描新闻
@@ -735,8 +758,6 @@ class Database(DatabaseBase):
             '''
             
             cursor.execute(query, (start_time,))
-            # Set row_factory for dict-like access
-            conn.row_factory = sqlite3.Row
             rows = cursor.fetchall()
             
             scanned_count = len(rows)
@@ -776,7 +797,12 @@ class Database(DatabaseBase):
                 if is_filtered:
                     # Mark as filtered and update timestamp to ensure it appears at top (User Request)
                     current_time = get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')
-                    cursor.execute("UPDATE deduplicated_news SET stage = 'filtered', deduplicated_at = ? WHERE id = ?", (current_time, item_id))
+                    # Save the filter reason
+                    filter_reason = f"包含:{matched_keyword}" if not matched_keyword.startswith("regex:") else f"正则:{matched_keyword[6:]}"
+                    cursor.execute(
+                        "UPDATE deduplicated_news SET stage = 'filtered', deduplicated_at = ?, keyword_filter_reason = ? WHERE id = ?", 
+                        (current_time, filter_reason, item_id)
+                    )
                     filtered_count += 1
                 else:
                     # Clean! Move to curated_news
