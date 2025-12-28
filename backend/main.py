@@ -494,7 +494,16 @@ async def deduplicate_news(req: DeduplicateRequest):
         
         # 2. 使用LocalDeduplicator找出重复
         print(f"正在调用 LocalDeduplicator (本地去重算法) [阈值: {req.threshold}]...")
-        dedup = LocalDeduplicator(similarity_threshold=req.threshold, time_window_hours=req.time_window_hours)
+        
+        # 保存用户设置的阈值到系统配置，供自动化流程使用
+        db.set_config("dedup_threshold", str(req.threshold))
+        
+        # 注意：前端的time_window_hours只用于限定查询范围
+        # 算法内部固定使用2小时窗口进行两两对比
+        dedup = LocalDeduplicator(
+            similarity_threshold=req.threshold, 
+            time_window_hours=2  # 固定2小时窗口
+        )
         
         # 记录开始前的内存状态或简单日志
         news_list = dedup.mark_duplicates(news_list)
@@ -594,9 +603,16 @@ async def check_news_similarity(req: CheckSimilarityRequest):
         
         conn.close()
         
+        # 计算相似度 (使用与手动去重相同的默认阈值)
+        threshold = 0.50  # 与 DeduplicateRequest 的默认值保持一致
+        deduplicator = LocalDeduplicator(similarity_threshold=threshold)
+        
+        # 提取特征
+        features1 = deduplicator.extract_features(news_1['title'])
+        features2 = deduplicator.extract_features(news_2['title'])
+        
         # 计算相似度
-        deduplicator = LocalDeduplicator()
-        similarity = deduplicator.calculate_similarity(news_1['title'], news_2['title'])
+        similarity = deduplicator.calculate_similarity(features1, features2)
         
         # 使用去重器的阈值，而不是硬编码
         threshold = deduplicator.similarity_threshold
@@ -987,7 +1003,7 @@ async def auto_deduplication():
     cursor.execute("""
         SELECT id, title, content, source_url, source_site, published_at, scraped_at
         FROM news 
-        WHERE stage = 'raw' AND published_at >= ?
+        WHERE (stage = 'raw' OR stage = 'deduplicated') AND published_at >= ?
         ORDER BY published_at DESC
     """, (cutoff_time,))
     
@@ -1015,7 +1031,15 @@ async def auto_deduplication():
     
     # 使用LocalDeduplicator标记重复
     from filters.local_deduplicator import LocalDeduplicator
-    deduplicator = LocalDeduplicator()
+    # 从系统配置读取阈值，默认0.50
+    threshold = float(db.get_config("dedup_threshold") or 0.50)
+    # 使用LocalDeduplicator标记重复
+    from filters.local_deduplicator import LocalDeduplicator
+    # 从系统配置读取阈值，默认0.50
+    threshold = float(db.get_config("dedup_threshold") or 0.50)
+    
+    # 统一使用2小时窗口（与手动去重一致）
+    deduplicator = LocalDeduplicator(similarity_threshold=threshold, time_window_hours=2)
     marked_news = deduplicator.mark_duplicates(news_list)
     
     # 将非重复的新闻移到deduplicated_news表
@@ -1042,7 +1066,15 @@ async def auto_deduplication():
             dedup_count += 1
         else:
             # 标记为重复
-            cursor.execute("UPDATE news SET stage = 'duplicate' WHERE id = ?", (news['id'],))
+            # 关键修复：必须更新 duplicate_of 和 is_local_duplicate
+            dup_of = news.get('duplicate_of')
+            cursor.execute("""
+                UPDATE news 
+                SET stage = 'duplicate', 
+                    duplicate_of = ?, 
+                    is_local_duplicate = 1 
+                WHERE id = ?
+            """, (dup_of, news['id']))
     
     conn.commit()
     conn.close()
@@ -1217,7 +1249,7 @@ async def auto_telegram_push():
     cursor = conn.cursor()
     
     # 从配置读取时间范围，默认2小时
-    push_hours = int(db.get_config("auto_push_hours") or 2)
+    push_hours = int(db.get_config("auto_push_hours") or 12)
     
     # 计算时间前的时间（北京时间）
     from datetime import timedelta
@@ -1260,10 +1292,27 @@ async def auto_telegram_push():
         logger.info("📤 [Auto-Push] No items to push")
         return
     
+    # 获取最近已推送的30条新闻用于去重
+    cursor.execute("""
+        SELECT title 
+        FROM curated_news 
+        WHERE push_status = 'sent' 
+        ORDER BY pushed_at DESC 
+        LIMIT 30
+    """)
+    recent_pushed = cursor.fetchall()
+    
     # 逐条推送
     from services.telegram_bot import TelegramBot
     import html as html_lib
     import random
+    import sys
+    sys.path.insert(0, 'crawler')
+    from filters.local_deduplicator import LocalDeduplicator
+    
+    # 从系统配置读取阈值，默认0.50
+    threshold = float(db.get_config("dedup_threshold") or 0.50)
+    deduplicator = LocalDeduplicator(similarity_threshold=threshold)
     
     TELEGRAM_FOOTER = """
 <a href="https://0xcheshire.gitbook.io/web3/">币圈新人手册</a>
@@ -1275,6 +1324,44 @@ Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <
     
     for news in to_push:
         news_id, title, url, content, ai_summary = news
+        
+        # 🛡️ 最后的防线：检查是否与最近推送的新闻重复
+        is_duplicate = False
+        for pushed in recent_pushed:
+            pushed_title = pushed[0]
+            # 使用阈值检查（需要先提取特征）
+            title_features = deduplicator.extract_features(title)
+            pushed_features = deduplicator.extract_features(pushed_title)
+            if deduplicator.calculate_similarity(title_features, pushed_features) >= deduplicator.similarity_threshold:
+                logger.warning(f"🛡️ [Auto-Push] Prevented duplicate push: {title[:30]}... (Similar to pushed: {pushed_title[:30]}...)")
+                
+                # 标记该新闻为 duplicate (防止重复骚扰)
+                is_duplicate = True
+                
+                # 关键修复：同步更新数据库状态，这样前端刷新时就能看到它是重复的
+                try:
+                    # 找到对应的主新闻ID（根据title）
+                    cursor.execute("SELECT id FROM news WHERE title = ? LIMIT 1", (pushed_title,))
+                    parent_row = cursor.fetchone()
+                    if parent_row:
+                        parent_id = parent_row[0]
+                        # 更新当前新闻状态
+                        cursor.execute("""
+                            UPDATE news 
+                            SET duplicate_of = ?, is_local_duplicate = 1, stage = 'deduplicated'
+                            WHERE id = ?
+                        """, (parent_id, news_id))
+                        # 如果已经在curated_news中，也可能需要标记为rejected或删除？
+                        # 目前先只更新news表，保证去重列表中能看到
+                        conn.commit()
+                        logger.info(f"   ↳ Marked news {news_id} as duplicate of {parent_id} in DB")
+                except Exception as e:
+                    logger.error(f"   ↳ Failed to update DB status for duplicate: {e}")
+                
+                break
+        
+        if is_duplicate:
+            continue
         
         try:
             # 构建消息
@@ -1301,6 +1388,11 @@ Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <
                 
                 success_count += 1
                 logger.info(f"✅ [Auto-Push] Sent ({success_count}/{len(to_push)}): {title[:40]}...")
+                
+                # 关键修复：将刚推送成功的标题也加入到 recent_pushed，
+                # 这样同一批次中后面的新闻就能检测到它了，防止"自相残杀"或漏判
+                recent_pushed.append((title,))
+                
             else:
                 logger.error(f"❌ [Auto-Push] Failed to send: {title[:40]}...")
             
@@ -1542,10 +1634,9 @@ async def batch_restore_all_deduplicated(user: User = Depends(get_current_user))
         
         # ----------------------------------------------------------------
         # 新增：同时重置都被标记为 Duplicate 的新闻 (真正的"撤销去重")
-        # ----------------------------------------------------------------
         cursor.execute("""
             UPDATE news 
-            SET stage = 'pending', 
+            SET stage = 'raw', 
                 is_duplicate = 0, 
                 duplicate_of = NULL
             WHERE stage = 'duplicate'
@@ -2031,7 +2122,7 @@ async def get_auto_pipeline_config():
         "dedup_hours": int(db.get_config("auto_dedup_hours") or 2),
         "filter_hours": int(db.get_config("auto_filter_hours") or 24),
         "ai_scoring_hours": int(db.get_config("auto_ai_scoring_hours") or 10),
-        "push_hours": int(db.get_config("auto_push_hours") or 2),
+        "push_hours": int(db.get_config("auto_push_hours") or 12),
     })
 
 @app.post("/api/config/auto_pipeline")

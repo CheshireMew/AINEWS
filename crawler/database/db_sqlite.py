@@ -92,6 +92,13 @@ class Database(DatabaseBase):
             conn.commit()
         except sqlite3.OperationalError:
             pass
+            
+        # 尝试添加 is_local_duplicate 字段 (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE news ADD COLUMN is_local_duplicate BOOLEAN DEFAULT FALSE")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
         
         # 创建tags表
         cursor.execute('''
@@ -451,8 +458,8 @@ class Database(DatabaseBase):
         finally:
             if conn:
                 conn.close()
-    def get_news_by_time_range(self, hours: int) -> List[Dict]:
-        """获取指定时间范围内的新闻"""
+    def get_news_by_time_range(self, hours: int, type_filter: str = 'news') -> List[Dict]:
+        """获取指定时间范围内的新闻 (支持类型筛选)"""
         try:
             conn = self.connect()
             cursor = conn.cursor()
@@ -466,8 +473,9 @@ class Database(DatabaseBase):
                     SELECT id, title, content, source_site, source_url, published_at, scraped_at,
                            is_marked_important, site_importance_flag, stage, type
                     FROM news
+                    WHERE type = ?
                     ORDER BY published_at DESC
-                ''')
+                ''', (type_filter,))
             else:
                 threshold = datetime.now() - timedelta(hours=hours)
                 threshold_str = threshold.strftime('%Y-%m-%d %H:%M:%S')
@@ -476,9 +484,9 @@ class Database(DatabaseBase):
                     SELECT id, title, content, source_site, source_url, published_at, scraped_at,
                            is_marked_important, site_importance_flag, stage, type
                     FROM news
-                    WHERE scraped_at >= ?
+                    WHERE scraped_at >= ? AND type = ?
                     ORDER BY published_at DESC
-                ''', (threshold_str,))
+                ''', (threshold_str, type_filter))
             
             
             rows = cursor.fetchall()
@@ -638,11 +646,15 @@ class Database(DatabaseBase):
         except:
             return 0
         
-    def get_deduplicated_news(self, page=1, limit=50, source=None, keyword=None):
-        """分页查询deduplicated_news表 - 已重构"""
-        where = "source_site = ?" if source else "1=1"
-        params = [source] if source else []
+    def get_deduplicated_news(self, page=1, limit=50, source=None, keyword=None, type_filter='news'):
+        """分页查询deduplicated_news表 (支持类型筛选)"""
+        where = "type = ?"
+        params = [type_filter]
         
+        if source:
+            where += " AND source_site = ?"
+            params.append(source)
+            
         if keyword:
             where += " AND (title LIKE ? OR content LIKE ?)"
             term = f"%{keyword}%"

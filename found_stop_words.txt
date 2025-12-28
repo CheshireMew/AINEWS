@@ -1,0 +1,3 @@
+No dynamic stop words found (threshold > 50%).
+Top 5 frequent words: [('比特币', 268), ('比特', 268), ('以太', 188), ('以太坊', 188), ('币安', 120)]
+Total documents: 1145, Threshold: 572.5
