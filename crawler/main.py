@@ -19,7 +19,15 @@ from scrapers.foresight import ForesightScraper
 from scrapers.chaincatcher import ChainCatcherScraper
 from scrapers.panews import PANewsScraper
 from scrapers.marsbit import MarsBitScraper
-from scrapers.marsbit import MarsBitScraper
+from scrapers.foresight_article import (
+    ForesightExclusiveScraper,
+    ForesightExpressScraper,
+    ForesightDepthScraper
+)
+from scrapers.marsbit_article import MarsBitArticleScraper
+from scrapers.blockbeats_article import BlockBeatsArticleScraper
+from filters.local_deduplicator import LocalDeduplicator
+from filters.tag_filter import TagFilter
 
 load_dotenv()
 
@@ -30,8 +38,16 @@ class NewsCrawler:
         self.ai_tagger = AITagger()
         # self.deduplicator = AIDuplicateDetector() (AI去重已移除)
         
-        # 初始化爬虫列表（8个加密媒体）
+        # 初始化爬虫列表（按优先级排序：文章爬虫 > 快讯爬虫）
         self.scrapers = [
+            # 文章类爬虫（优先级高）
+            ForesightExclusiveScraper(),
+            ForesightExpressScraper(),
+            ForesightDepthScraper(),
+            MarsBitArticleScraper(),
+            BlockBeatsArticleScraper(),
+            
+            # 快讯类爬虫
             TechFlowScraper(),
             OdailyScraper(),
             BlockBeatsScraper(),
@@ -49,6 +65,8 @@ class NewsCrawler:
         for scraper in self.scrapers:
             try:
                 print(f"\n抓取 {scraper.site_name}...")
+                # 启用增量抓取: 加载上次抓取的状态
+                scraper.load_last_news(self.db)
                 news_list = await scraper.run()
                 
                 for news in news_list:
@@ -71,10 +89,13 @@ class NewsCrawler:
                 'title': news['title'],
                 'content': news.get('content', ''),
                 'source_url': news['url'],
+                'url': news['url'],  # db_sqlite.py insert_news 需要 'url' 字段
                 'source_site': news['source_site'],
                 'published_at': news.get('published_at'),
                 'is_marked_important': news.get('is_marked_important', False),
-                'site_importance_flag': news.get('site_importance_flag', '')
+                'site_importance_flag': news.get('site_importance_flag', ''),
+                'type': news.get('type', 'news'),
+                'author': news.get('author', '')
             })
             
             if news_id:

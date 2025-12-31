@@ -13,18 +13,22 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
     const isRunning = status.status === 'running';
 
     // Optimistic UI: Initialize with props, but allow immediate local input
-    const [localLimit, setLocalLimit] = useState(status.limit || 5);
+    // Default to 20 to match backend default configuration
+    const [localLimit, setLocalLimit] = useState(status.limit || 20);
     const [localInterval, setLocalInterval] = useState(() => {
         if (status.interval) return String(status.interval);
-        return "15"; // Default if undefined
+        return "manual"; // Default to manual if undefined
     });
 
     useEffect(() => {
         if (status.limit !== undefined) {
             setLocalLimit(status.limit);
         }
-        if (status.interval !== undefined) {
+        // Update interval: if undefined/null (manual mode), set to "manual"
+        if (status.interval !== undefined && status.interval !== null) {
             setLocalInterval(String(status.interval));
+        } else {
+            setLocalInterval("manual");
         }
     }, [status.limit, status.interval]);
 
@@ -75,6 +79,7 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
                         <Option value={30}>30</Option>
                     </Select>
 
+
                     <span style={{ fontSize: 12 }}>频率:</span>
                     <Select
                         listHeight={180}
@@ -84,12 +89,26 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
                         onChange={(val) => handleConfigUpdate('interval', val)}
                     >
                         <Option value="manual">手动</Option>
-                        <Option value="15">15分钟</Option>
-                        <Option value="30">30分钟</Option>
-                        <Option value="60">1小时</Option>
-                        <Option value="120">2小时</Option>
-                        <Option value="180">3小时</Option>
-                        <Option value="300">5小时</Option>
+                        {/* 文章爬虫使用不同的频率选项（包括foresight专栏和article后缀的爬虫） */}
+                        {(name.includes('article') || name.startsWith('foresight_')) ? (
+                            <>
+                                <Option value="60">1小时</Option>
+                                <Option value="120">2小时</Option>
+                                <Option value="240">4小时</Option>
+                                <Option value="480">8小时</Option>
+                                <Option value="720">12小时</Option>
+                                <Option value="1440">24小时</Option>
+                            </>
+                        ) : (
+                            <>
+                                <Option value="15">15分钟</Option>
+                                <Option value="30">30分钟</Option>
+                                <Option value="60">1小时</Option>
+                                <Option value="120">2小时</Option>
+                                <Option value="180">3小时</Option>
+                                <Option value="300">5小时</Option>
+                            </>
+                        )}
                     </Select>
 
                     {isRunning ? (

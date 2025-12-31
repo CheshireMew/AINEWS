@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import usePaginationConfig from '../common/usePaginationConfig';
 import PropTypes from 'prop-types';
 import { Card, Button, Select, Input, Table, Space, message, Popconfirm, Divider } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -15,7 +16,8 @@ const { Option } = Select;
  * 过滤设置Tab组件
  * 用于管理黑名单关键词和查看被过滤的新闻
  */
-const FilterSettingsTab = ({ onAddToFeatured, active }) => {
+const FilterSettingsTab = ({ onAddToFeatured, active, contentType }) => {
+    const { getPaginationConfig } = usePaginationConfig();
     // 本地过滤状态
     const [filterTimeRange, setFilterTimeRange] = useState(6);
     const [filtering, setFiltering] = useState(false);
@@ -34,23 +36,28 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
     // 组件加载时获取数据
     useEffect(() => {
         fetchBlacklistData();
-        fetchFilteredNews(1);
+        fetchFilteredNews(1, filteredPagination.pageSize);
     }, []);
 
     // 激活时刷新数据
     useEffect(() => {
         if (active) {
             fetchBlacklistData();
-            fetchFilteredNews(filteredPagination.current, filterKeyword);
+            fetchFilteredNews(filteredPagination.current, filteredPagination.pageSize, filterKeyword);
         }
     }, [active]);
+
+    // contentType 变化时刷新数据
+    useEffect(() => {
+        fetchFilteredNews(1, filteredPagination.pageSize);
+    }, [contentType]);
 
     /**
      * 获取黑名单数据
      */
     const fetchBlacklistData = async () => {
         try {
-            const res = await getBlacklist();
+            const res = await getBlacklist(contentType);
             setBlacklistKeywords(res.data.keywords || []);
         } catch (e) {
             console.error("Fetch blacklist failed", e);
@@ -63,7 +70,7 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
     const handleAddKeyword = async () => {
         if (!newKeyword.trim()) return;
         try {
-            await addBlacklist(newKeyword.trim(), newMatchType);
+            await addBlacklist(newKeyword.trim(), newMatchType, contentType);
             message.success('添加成功');
             setNewKeyword('');
             fetchBlacklistData();
@@ -91,8 +98,11 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
     const handleFilterNews = async () => {
         setFiltering(true);
         try {
-            const res = await filterNews(filterTimeRange);
-            message.success(`过滤完成！标记了 ${res.data.stats.filtered} 条新闻`);
+            const res = await filterNews(filterTimeRange, contentType);
+            const stats = res.data.stats;
+            message.success(`过滤完成！共扫描 ${stats.scanned} 条：过滤 ${stats.filtered} 条，通过 ${stats.curated || 0} 条`);
+            // 刷新已过滤列表以显示新过滤的数据
+            fetchFilteredNews(1, filteredPagination.pageSize);
         } catch (e) {
             message.error('过滤失败: ' + (e.response?.data?.detail || e.message));
         } finally {
@@ -105,9 +115,9 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
      */
     const handleBatchRestoreFiltered = async () => {
         try {
-            const res = await batchRestoreFiltered();
+            const res = await batchRestoreFiltered(contentType);
             message.success(`批量还原成功！还原了 ${res.data.restored_count} 条数据`);
-            fetchFilteredNews(1);
+            fetchFilteredNews(1, filteredPagination.pageSize);
         } catch (e) {
             message.error('批量还原失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -116,14 +126,15 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
     /**
      * 获取已过滤新闻
      */
-    const fetchFilteredNews = async (page = 1, keyword = filterKeyword) => {
+    const fetchFilteredNews = async (page = 1, pageSize = filteredPagination.pageSize, keyword = filterKeyword) => {
         setLoadingFiltered(true);
         try {
-            const res = await getFilteredDedupNews(page, 10, keyword);
+            const res = await getFilteredDedupNews(page, pageSize, keyword, contentType);
             setFilteredNews(res.data.data);
             setFilteredPagination({
                 ...filteredPagination,
                 current: page,
+                pageSize: pageSize,
                 total: res.data.total
             });
         } catch (e) {
@@ -239,7 +250,7 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
                     </Button>
                     <Popconfirm
                         title="还原已过滤数据"
-                        description="确定要还原所有已过滤的数据吗？这将把状态为 'filtered' 的数据重置为 'deduplicated' 状态。"
+                        description="确定要还原所有已过滤/已精选的数据吗？这将把 'filtered'和'verified' 状态的数据都重置为 'deduplicated'，以便重新进行过滤。"
                         onConfirm={handleBatchRestoreFiltered}
                         okText="确定"
                         cancelText="取消"
@@ -289,9 +300,9 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
                     <NewsToolbar
                         onSearch={(val) => {
                             setFilterKeyword(val);
-                            fetchFilteredNews(1, val);
+                            fetchFilteredNews(1, filteredPagination.pageSize, val);
                         }}
-                        onRefresh={() => fetchFilteredNews(filteredPagination.current, filterKeyword)}
+                        onRefresh={() => fetchFilteredNews(filteredPagination.current, filteredPagination.pageSize, filterKeyword)}
                         loading={loadingFiltered}
                     />
                 </div>
@@ -300,10 +311,11 @@ const FilterSettingsTab = ({ onAddToFeatured, active }) => {
                     dataSource={filteredNews}
                     rowKey="id"
                     loading={loadingFiltered}
-                    pagination={{
-                        ...filteredPagination,
-                        onChange: (page) => fetchFilteredNews(page, filterKeyword)
-                    }}
+                    pagination={getPaginationConfig(
+                        filteredPagination,
+                        (page, pageSize) => fetchFilteredNews(page, pageSize, filterKeyword),
+                        (page, pageSize) => fetchFilteredNews(1, pageSize, filterKeyword)
+                    )}
                     size="small"
                     expandable={{
                         expandedRowRender: record => <NewsExpandedView record={record} />,

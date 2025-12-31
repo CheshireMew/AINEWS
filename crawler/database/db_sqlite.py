@@ -93,10 +93,64 @@ class Database(DatabaseBase):
         except sqlite3.OperationalError:
             pass
             
+        # 尝试添加 ai_score 字段 (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_score INTEGER")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # 尝试添加 ai_category 字段 (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_category TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+            
         # 尝试添加 is_local_duplicate 字段 (如果不存在)
         try:
             cursor.execute("ALTER TABLE news ADD COLUMN is_local_duplicate BOOLEAN DEFAULT FALSE")
             conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        
+        # 尝试添加 author 字段 (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE news ADD COLUMN author TEXT DEFAULT ''")
+            conn.commit()
+            print("✅ 已添加 author 字段到 news 表")
+        except sqlite3.OperationalError:
+            pass
+        
+        # 尝试添加 type 字段到 deduplicated_news (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE deduplicated_news ADD COLUMN type TEXT DEFAULT 'news'")
+            conn.commit()
+            print("✅ 已添加 type 字段到 deduplicated_news 表")
+            # 迁移已有数据的 type 值
+            cursor.execute("""
+                UPDATE deduplicated_news 
+                SET type = (SELECT type FROM news WHERE news.id = deduplicated_news.id)
+                WHERE type = 'news' AND EXISTS (SELECT 1 FROM news WHERE news.id = deduplicated_news.id AND news.type != 'news')
+            """)
+            conn.commit()
+            print("✅ 已迁移 deduplicated_news 的 type 数据")
+        except sqlite3.OperationalError:
+            pass
+        
+        # 尝试添加 type 字段到 curated_news (如果不存在)
+        try:
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN type TEXT DEFAULT 'news'")
+            conn.commit()
+            print("✅ 已添加 type 字段到 curated_news 表")
+            # 迁移已有数据的 type 值
+            cursor.execute("""
+                UPDATE curated_news 
+                SET type = (SELECT type FROM news WHERE news.id = curated_news.id)
+                WHERE type = 'news' AND EXISTS (SELECT 1 FROM news WHERE news.id = curated_news.id AND news.type != 'news')
+            """)
+            conn.commit()
+            print("✅ 已迁移 curated_news 的 type 数据")
         except sqlite3.OperationalError:
             pass
         
@@ -238,42 +292,59 @@ class Database(DatabaseBase):
                 type TEXT DEFAULT 'news',
                 original_news_id INTEGER,
                 ai_status TEXT,
-                ai_summary TEXT
+                ai_summary TEXT,
+                ai_explanation TEXT,
+                ai_score INTEGER,
+                ai_category TEXT,
+                
+                push_status TEXT DEFAULT 'pending',
+                pushed_at TIMESTAMP
             )
         ''')
         
         # Migration: Add ai_status and ai_summary columns if they don't exist
         try:
-            cursor.execute("SELECT ai_status FROM curated_news LIMIT 0")
-        except sqlite3.OperationalError:
-            print("📊 Migrating: Adding ai_status column to curated_news")
             cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_status TEXT")
-            
-        try:
-            cursor.execute("SELECT ai_summary FROM curated_news LIMIT 0")
+            conn.commit()
         except sqlite3.OperationalError:
-            print("📊 Migrating: Adding ai_summary column to curated_news")
+            pass
+
+        try:
             cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_summary TEXT")
-        
-        # Migration: Add ai_explanation column (for AI filter reason with tag)
-        try:
-            cursor.execute("SELECT ai_explanation FROM curated_news LIMIT 0")
+            conn.commit()
         except sqlite3.OperationalError:
-            print("📊 Migrating: Adding ai_explanation column to curated_news")
+            pass
+
+        try:
             cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_explanation TEXT")
-        
-        # Migration: Add push_status and pushed_at columns if they don't exist
-        try:
-            cursor.execute("SELECT push_status FROM curated_news LIMIT 0")
+            conn.commit()
         except sqlite3.OperationalError:
-            print("📊 Migrating: Adding push_status column to curated_news")
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_score INTEGER")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute("ALTER TABLE curated_news ADD COLUMN ai_category TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
             cursor.execute("ALTER TABLE curated_news ADD COLUMN push_status TEXT DEFAULT 'pending'")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
             
         try:
-            cursor.execute("SELECT pushed_at FROM curated_news LIMIT 0")
-        except sqlite3.OperationalError:
-            print("📊 Migrating: Adding pushed_at column to curated_news")
             cursor.execute("ALTER TABLE curated_news ADD COLUMN pushed_at TIMESTAMP")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_source ON curated_news(source_site)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_time ON curated_news(curated_at)')
@@ -289,6 +360,15 @@ class Database(DatabaseBase):
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # 添加 type 字段迁移（用于区分 news 和 article 黑名单）
+        try:
+            cursor.execute("ALTER TABLE keyword_blacklist ADD COLUMN type TEXT DEFAULT 'news'")
+            conn.commit()
+            print("✅ 已为 keyword_blacklist 表添加 type 字段")
+        except sqlite3.OperationalError:
+            pass  # 字段已存在
+        
         
         # 初始化预定义标签
         predefined_tags = [
@@ -348,8 +428,8 @@ class Database(DatabaseBase):
             cursor.execute('''
                 INSERT INTO news (
                     title, content, source_site, source_url, published_at, scraped_at,
-                    is_marked_important, site_importance_flag, stage, type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_marked_important, site_importance_flag, stage, type, author
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 news_data['title'],
                 news_data.get('content', ''),
@@ -360,7 +440,8 @@ class Database(DatabaseBase):
                 news_data.get('is_marked_important', False),
                 news_data.get('site_importance_flag', ''),
                 'raw',
-                news_data.get('type', 'news')
+                news_data.get('type', 'news'),
+                news_data.get('author', '')
             ))
             
             news_id = cursor.lastrowid
@@ -646,14 +727,18 @@ class Database(DatabaseBase):
         except:
             return 0
         
-    def get_deduplicated_news(self, page=1, limit=50, source=None, keyword=None, type_filter='news'):
-        """分页查询deduplicated_news表 (支持类型筛选)"""
+    def get_deduplicated_news(self, page=1, limit=50, source=None, keyword=None, type_filter='news', stage=None):
+        """分页查询deduplicated_news表 (支持类型和状态筛选)"""
         where = "type = ?"
         params = [type_filter]
         
         if source:
             where += " AND source_site = ?"
             params.append(source)
+            
+        if stage:
+            where += " AND stage = ?"
+            params.append(stage)
             
         if keyword:
             where += " AND (title LIKE ? OR content LIKE ?)"
@@ -685,13 +770,14 @@ class Database(DatabaseBase):
             return []
 
     # --- Blacklist Methods ---
-    def add_blacklist_keyword(self, keyword: str, match_type: str = 'contains') -> bool:
+    def add_blacklist_keyword(self, keyword: str, match_type: str = 'contains', content_type: str = 'news') -> bool:
         """添加黑名单关键词"""
         conn = None
         try:
             conn = self.connect()
             cursor = conn.cursor()
-            cursor.execute('INSERT INTO keyword_blacklist (keyword, match_type) VALUES (?, ?)', (keyword, match_type))
+            cursor.execute('INSERT INTO keyword_blacklist (keyword, match_type, type) VALUES (?, ?, ?)', 
+                         (keyword, match_type, content_type))
             conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -720,28 +806,29 @@ class Database(DatabaseBase):
             if conn:
                 conn.close()
 
-    def get_blacklist_keywords(self):
-        """获取所有黑名单关键词"""
+    def get_blacklist_keywords(self, content_type: str = 'news'):
+        """获取指定类型的黑名单关键词"""
         try:
             conn = self.connect()
             cursor = conn.cursor()
-            cursor.execute('SELECT id, keyword, match_type, created_at FROM keyword_blacklist ORDER BY created_at DESC')
+            cursor.execute('SELECT id, keyword, match_type, type, created_at FROM keyword_blacklist WHERE type = ? ORDER BY created_at DESC', 
+                         (content_type,))
             rows = cursor.fetchall()
             conn.close()
-            return [{'id': r[0], 'keyword': r[1], 'match_type': r[2], 'created_at': r[3]} for r in rows]
+            return [{'id': r[0], 'keyword': r[1], 'match_type': r[2], 'type': r[3], 'created_at': r[4]} for r in rows]
         except Exception as e:
             print(f"获取关键词失败: {e}")
             return []
 
-    def filter_news_by_blacklist(self, time_range_hours: int = 24) -> dict:
+    def filter_news_by_blacklist(self, time_range_hours: int = 24, type_filter: str = 'news') -> dict:
         """
-        根据黑名单过滤新闻
+        根据黑名单过滤新闻 (支持类型)
         扫描指定时间范围内 raw 和 deduplicated 状态的新闻
         """
         try:
-            keywords = self.get_blacklist_keywords()
-            if not keywords:
-                return {'scanned': 0, 'filtered': 0}
+            keywords = self.get_blacklist_keywords(type_filter)
+            # if not keywords:
+            #     return {'scanned': 0, 'filtered': 0}
 
             from datetime import datetime, timedelta
             # Fix: Use the same format as DB (space separator), ISO format 'T' causes string comparison mismatches
@@ -762,14 +849,15 @@ class Database(DatabaseBase):
             
             # 1. 扫描 deduplicated_news
             query = '''
-                SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, original_news_id
+                SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, original_news_id, type
                 FROM deduplicated_news 
                 WHERE deduplicated_at >= ? 
                 AND stage = 'deduplicated'
                 AND (is_whitelist_restored IS NULL OR is_whitelist_restored = 0)
+                AND type = ?
             '''
             
-            cursor.execute(query, (start_time,))
+            cursor.execute(query, (start_time, type_filter))
             rows = cursor.fetchall()
             
             scanned_count = len(rows)
@@ -824,21 +912,22 @@ class Database(DatabaseBase):
                                 title, content, source_site, source_url, published_at, scraped_at, 
                                 deduplicated_at, curated_at, is_marked_important, site_importance_flag, 
                                 stage, type, original_news_id
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'curated', 'news', ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'curated', ?, ?)
                         ''', (
                             row['title'], row['content'], row['source_site'], row['source_url'], 
                             row['published_at'], row['scraped_at'], row['deduplicated_at'], 
                             get_beijing_time().strftime('%Y-%m-%d %H:%M:%S'), 
                             row['is_marked_important'], row['site_importance_flag'], 
+                            row['type'] if 'type' in row.keys() else 'news',  # 修复: sqlite3.Row 不支持 get
                             row['original_news_id']
                         ))
                         
-                        # Mark as curated in deduplicated_news so we don't scan again
-                        cursor.execute("UPDATE deduplicated_news SET stage = 'curated' WHERE id = ?", (item_id,))
+                        # Mark as verified in deduplicated_news so we don't scan again
+                        cursor.execute("UPDATE deduplicated_news SET stage = 'verified' WHERE id = ?", (item_id,))
                         curated_count += 1
                     except sqlite3.IntegrityError:
                         # Already exists, just update stage
-                        cursor.execute("UPDATE deduplicated_news SET stage = 'curated' WHERE id = ?", (item_id,))
+                        cursor.execute("UPDATE deduplicated_news SET stage = 'verified' WHERE id = ?", (item_id,))
                         pass
                 
                 # Batch commit every 10 updates to prevent data loss on crash
@@ -850,9 +939,9 @@ class Database(DatabaseBase):
             query_curated = '''
                 SELECT id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, is_marked_important, site_importance_flag, original_news_id
                 FROM curated_news
-                WHERE curated_at >= ?
+                WHERE curated_at >= ? AND type = ?
             '''
-            cursor.execute(query_curated, (start_time,))
+            cursor.execute(query_curated, (start_time, type_filter))
             curated_rows = cursor.fetchall()
 
             retroactive_filtered_count = 0
@@ -911,11 +1000,14 @@ class Database(DatabaseBase):
                         # Update timestamp to bring to top
                         current_time = get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')
                         
+                        # Save the filter reason
+                        filter_reason = f"包含:{matched_keyword}" if not matched_keyword.startswith("regex:") else f"正则:{matched_keyword[6:]}"
+                        
                         cursor.execute('''
                             UPDATE deduplicated_news 
-                            SET stage = 'filtered', deduplicated_at = ?
+                            SET stage = 'filtered', deduplicated_at = ?, keyword_filter_reason = ?
                             WHERE source_url = ?
-                        ''', (current_time, row['source_url']))
+                        ''', (current_time, filter_reason, row['source_url']))
                         
                         retroactive_filtered_count += 1
                         print(f"Retroactive Filter: Removed '{title[:20]}...' from Curated.")
@@ -931,8 +1023,8 @@ class Database(DatabaseBase):
             conn.close()
             
             total_filtered = filtered_count + retroactive_filtered_count
-            print(f"过滤完成: 扫描 {scanned_count} 条新数据, 过滤 {filtered_count} 条; 追溯精选数据过滤 {retroactive_filtered_count} 条")
-            return {'scanned': scanned_count, 'filtered': total_filtered, 'retroactive': retroactive_filtered_count}
+            print(f"过滤完成: 扫描 {scanned_count} 条新数据, 过滤 {filtered_count} 条; 通过 {curated_count} 条; 追溯精选数据过滤 {retroactive_filtered_count} 条")
+            return {'scanned': scanned_count, 'filtered': total_filtered, 'curated': curated_count, 'retroactive': retroactive_filtered_count}
             
         except Exception as e:
             print(f"执行过滤失败: {e}")
@@ -992,22 +1084,31 @@ class Database(DatabaseBase):
             print(f"Export query failed: {e}")
             return []
 
-    def get_curated_news(self, page=1, limit=50, source=None, keyword=None):
+    def get_curated_news(self, page=1, limit=50, source=None, keyword=None, type_filter='news', ai_status=None):
         """分页查询 curated_news 表 (精选数据) - 已重构使用基类"""
         # 构建WHERE条件
-        where = "source_site = ?" if source else "1=1"
-        params = [source] if source else []
+        where = "type = ?"
+        params = [type_filter]
         
+        if source:
+            where += " AND source_site = ?"
+            params.append(source)
+            
         if keyword:
             where += " AND (title LIKE ? OR content LIKE ?)"
             term = f"%{keyword}%"
             params.append(term)
             params.append(term)
-        
-        # 使用基类的paginated_query方法
+            
+        if ai_status == 'pending':
+            where += " AND ai_status IS NULL"
+        elif ai_status:
+            where += " AND ai_status = ?"
+            params.append(ai_status)
+            
         return self.paginated_query(
             table='curated_news',
-            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type',
+            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, ai_status, ai_summary, ai_explanation, ai_score, ai_category, push_status, pushed_at, type, original_news_id',
             where=where,
             where_params=tuple(params),
             order_by='published_at DESC',
@@ -1015,20 +1116,7 @@ class Database(DatabaseBase):
             limit=limit
         )
     
-    def get_filtered_curated_news(self, ai_status, page=1, limit=50):
-        """获取经过AI筛选的精选数据 - 已重构"""
-        where = "ai_status = ?"
-        params = (ai_status,)
-        
-        return self.paginated_query(
-            table='curated_news',
-            fields='id, title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, curated_at, is_marked_important, site_importance_flag, stage, type, ai_status, ai_summary',
-            where=where,
-            where_params=params,
-            order_by='published_at DESC',
-            page=page,
-            limit=limit
-        )
+
 
     def get_curated_stats(self):
         """获取精选数据统计"""
@@ -1129,10 +1217,10 @@ class Database(DatabaseBase):
             print(f"获取最近URL列表失败: {e}")
             return []
 
-    def get_filtered_dedup_news(self, page=1, limit=50, keyword=None):
-        """获取去重库中的已过滤数据 - 已重构"""
-        where = "stage = 'filtered'"
-        params = []
+    def get_filtered_dedup_news(self, page=1, limit=50, keyword=None, type_filter='news'):
+        """获取去重库中的已过滤数据 - 已重构 (支持类型筛选)"""
+        where = "stage = 'filtered' AND type = ?"
+        params = [type_filter]
         
         if keyword:
             where += " AND (title LIKE ? OR content LIKE ?)"
@@ -1149,10 +1237,10 @@ class Database(DatabaseBase):
             limit=limit
         )
         
-    def get_filtered_curated_news(self, ai_status, page=1, limit=50, source=None, keyword=None):
-        """获取AI筛选后的精选数据 - 已重构"""
-        where = "ai_status = ?"
-        params = [ai_status]
+    def get_filtered_curated_news(self, ai_status, page=1, limit=50, source=None, keyword=None, type_filter='news'):
+        """获取AI筛选后的精选数据 - 已重构 (支持类型筛选)"""
+        where = "ai_status = ? AND type = ?"
+        params = [ai_status, type_filter]
 
         if source:
             where += " AND source_site = ?"

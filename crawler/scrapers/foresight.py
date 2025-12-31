@@ -169,7 +169,8 @@ class ForesightScraper(BaseScraper):
                     'source_site': self.site_name,
                     'published_at': published_at,
                     'is_marked_important': True,
-                    'site_importance_flag': importance_flag
+                    'site_importance_flag': importance_flag,
+                    'author': self.site_name
                 }
                 
                 news_list.append(news_item)

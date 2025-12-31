@@ -121,7 +121,7 @@ class LocalDeduplicator:
         crypto_stop_words = {
             'BTC', 'ETH', 'USDT', 'USDC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TRX',
             'btc', 'eth', 'usdt', 'usdc', 'bnb', 'sol', 'xrp', 'ada', 'doge', 'trx',
-            '比特币', '以太坊'
+            '比特币', '以太坊','ETF'
         }
         
         # 检测价格新闻：包含"美元"或"USDT"

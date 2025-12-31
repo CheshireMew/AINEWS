@@ -127,7 +127,8 @@ class BlockBeatsScraper(BaseScraper):
                     'url': url,
                     'published_at': published_at.strftime('%Y-%m-%d %H:%M:%S'),  # 转换为字符串格式
                     'is_marked_important': True,
-                    'site_importance_flag': importance_flag
+                    'site_importance_flag': importance_flag,
+                    'author': self.site_name
                 }
                 
                 news_list.append(news_item)

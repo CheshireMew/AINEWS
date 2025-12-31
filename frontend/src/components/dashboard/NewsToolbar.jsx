@@ -13,9 +13,10 @@ const NewsToolbar = ({
     onSearch,           // 搜索回调 (value) => {}
     searchPlaceholder = "搜索新闻...",
 
-    spiders,            // 爬虫列表 (用于来源筛选)
+    spiders,            // 爬虫列表 (用于来源筛选) - 数组中元素为 {name: 'techflow', type: 'news'}
     selectedSource,     // 当前选中的来源
     onSourceChange,     // 来源变更回调 (value) => {}
+    contentType,        // 当前内容类型 ('news' | 'article') - 用于过滤对应类型的爬虫
 
     onExport,           // 导出回调 () => {}
 
@@ -38,6 +39,11 @@ const NewsToolbar = ({
         }
     };
 
+    // 根据contentType过滤爬虫列表
+    const filteredSpiders = spiders && contentType
+        ? spiders.filter(s => s.type === contentType)
+        : spiders;
+
     return (
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, ...style }}>
             <Space size={12} wrap align="center">
@@ -53,7 +59,7 @@ const NewsToolbar = ({
                 )}
 
                 {/* 2. 来源筛选 */}
-                {spiders && onSourceChange && (
+                {filteredSpiders && onSourceChange && (
                     <Space size={4}>
                         <span style={{ fontSize: 14 }}>来源:</span>
                         <Select
@@ -62,7 +68,11 @@ const NewsToolbar = ({
                             onChange={onSourceChange}
                         >
                             <Option value="">全部来源</Option>
-                            {spiders.map(s => <Option key={s} value={s}>{s}</Option>)}
+                            {filteredSpiders.map(s => (
+                                <Option key={s.name} value={s.name}>
+                                    {s.display_name || s.name}
+                                </Option>
+                            ))}
                         </Select>
                     </Space>
                 )}

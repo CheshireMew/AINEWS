@@ -49,8 +49,23 @@ from scrapers.foresight import ForesightScraper
 from scrapers.chaincatcher import ChainCatcherScraper
 from scrapers.panews import PANewsScraper
 from scrapers.marsbit import MarsBitScraper
+from scrapers.foresight_article import (
+    ForesightExclusiveScraper,
+    ForesightExpressScraper,
+    ForesightDepthScraper,
 
-SCRAPER_MAP = {
+)
+from scrapers.blockbeats_article import BlockBeatsArticleScraper
+from scrapers.chaincatcher_article import ChainCatcherArticleScraper
+from scrapers.marsbit_article import MarsBitArticleScraper
+from scrapers.odaily_article import OdailyArticleScraper
+from scrapers.panews_article import PANewsArticleScraper
+from scrapers.techflow_article import TechflowArticleScraper
+from scrapers.wublock_article import WuBlockArticleScraper
+from scrapers.chainfeeds_article import ChainfeedsArticleScraper
+
+# 快讯类爬虫 (News)
+NEWS_SCRAPERS = {
     "techflow": TechFlowScraper,
     "odaily": OdailyScraper,
     "blockbeats": BlockBeatsScraper,
@@ -58,6 +73,33 @@ SCRAPER_MAP = {
     "chaincatcher": ChainCatcherScraper,
     "panews": PANewsScraper,
     "marsbit": MarsBitScraper,
+}
+
+# 深度文章类爬虫 (Articles)
+ARTICLE_SCRAPERS = {
+    # 拆分后的 Foresight 专栏爬虫
+    "foresight_exclusive": ForesightExclusiveScraper,
+    "foresight_express": ForesightExpressScraper,
+    "foresight_depth": ForesightDepthScraper,
+
+    
+    "blockbeats_article": BlockBeatsArticleScraper,
+    "chaincatcher_article": ChainCatcherArticleScraper,
+    "marsbit_article": MarsBitArticleScraper,
+    "odaily_article": OdailyArticleScraper,
+    "panews_article": PANewsArticleScraper,
+    "techflow_article": TechflowArticleScraper,
+    "wublock_article": WuBlockArticleScraper,
+    "chainfeeds_article": ChainfeedsArticleScraper,
+}
+
+# 所有爬虫的统一映射
+SCRAPER_MAP = {**NEWS_SCRAPERS, **ARTICLE_SCRAPERS}
+
+# 爬虫类型映射（用于前端过滤）
+SCRAPER_TYPES = {
+    **{name: 'news' for name in NEWS_SCRAPERS.keys()},
+    **{name: 'article' for name in ARTICLE_SCRAPERS.keys()}
 }
 
 app = FastAPI(title="AINews Admin API")
@@ -209,21 +251,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
 
-@app.get("/api/stats")
-async def get_stats():
-    """Get scraping statistics"""
-    try:
-        conn = db.connect()
-        cursor = conn.cursor()
-        cursor.execute("SELECT source_site, COUNT(*) as count FROM news GROUP BY source_site")
-        rows = cursor.fetchall()
-        stats = [{"source": row[0], "count": row[1]} for row in rows]
-        conn.close()
-        return APIResponse.success(data={'stats': stats})
-    except Exception as e:
-        logger.error(f"Error getting stats: {e}")
-        return APIResponse.error(message="Failed to get stats")
-
 class SystemTimezoneConfig(BaseModel):
     timezone: str
 
@@ -245,24 +272,87 @@ async def set_system_timezone(config: SystemTimezoneConfig, user: User = Depends
         raise HTTPException(status_code=400, detail="Invalid timezone")
 
 class DailyPushTimeConfig(BaseModel):
-    time: str # "20:00"
+    time: Optional[str] = None  # News daily push time "20:00"
+    article_time: Optional[str] = None  # Article daily push time "21:00"
 
 @app.get("/api/system/push_time")
 async def get_push_time():
-    """Get daily push time config"""
-    t = db.get_config("daily_push_time") or "20:00"
-    return {"time": t}
+    """Get daily push time config for news and articles"""
+    news_time = db.get_config("daily_push_time") or "20:00"
+    article_time = db.get_config("daily_article_push_time") or "21:00"
+    return {"time": news_time, "article_time": article_time}
 
 @app.post("/api/system/push_time")
 async def set_push_time(config: DailyPushTimeConfig, user: User = Depends(get_current_user)):
-    """Set daily push time config (HH:MM)"""
+    """Set daily push time config for news and articles (HH:MM)"""
     try:
-        # Validate format
-        datetime.strptime(config.time, "%H:%M")
-        db.set_config("daily_push_time", config.time)
-        return {"status": "success", "message": f"Push time set to {config.time}"}
+        # Validate and save news push time
+        if config.time:
+            datetime.strptime(config.time, "%H:%M")
+            db.set_config("daily_push_time", config.time)
+        
+        # Validate and save article push time
+        if config.article_time:
+            datetime.strptime(config.article_time, "%H:%M")
+            db.set_config("daily_article_push_time", config.article_time)
+        
+        return {"status": "success", "message": "Push time(s) updated successfully"}
     except ValueError:
-         raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM")
+        raise HTTPException(status_code=400, detail="Invalid time format. Use HH:MM")
+
+# Auto-Pipeline Configuration
+class AutoPipelineConfig(BaseModel):
+    # News config
+    dedup_hours: Optional[int] = None
+    filter_hours: Optional[int] = None
+    ai_scoring_hours: Optional[int] = None
+    push_hours: Optional[int] = None
+    # Article config
+    article_dedup_hours: Optional[int] = None
+    article_filter_hours: Optional[int] = None
+    article_ai_scoring_hours: Optional[int] = None
+    article_push_hours: Optional[int] = None
+
+@app.get("/api/config/auto_pipeline")
+async def get_auto_pipeline_config():
+    """Get auto-pipeline configuration for news and articles"""
+    return {
+        # News config
+        "dedup_hours": int(db.get_config("auto_dedup_hours") or 2),
+        "filter_hours": int(db.get_config("auto_filter_hours") or 24),
+        "ai_scoring_hours": int(db.get_config("auto_ai_scoring_hours") or 12),
+        "push_hours": int(db.get_config("auto_push_hours") or 12),
+        # Article config
+        "article_dedup_hours": int(db.get_config("auto_article_dedup_hours") or 7*24),  # 7天
+        "article_filter_hours": int(db.get_config("auto_article_filter_hours") or 7*24),  # 7天
+        "article_ai_scoring_hours": int(db.get_config("auto_article_ai_scoring_hours") or 7*24),  # 7天
+        "article_push_hours": int(db.get_config("auto_article_push_hours") or 3*24),  # 3天
+    }
+
+@app.post("/api/config/auto_pipeline")
+async def set_auto_pipeline_config(config: AutoPipelineConfig, user: User = Depends(get_current_user)):
+    """Set auto-pipeline configuration for news and articles"""
+    # Save news config
+    if config.dedup_hours is not None:
+        db.set_config("auto_dedup_hours", str(config.dedup_hours))
+    if config.filter_hours is not None:
+        db.set_config("auto_filter_hours", str(config.filter_hours))
+    if config.ai_scoring_hours is not None:
+        db.set_config("auto_ai_scoring_hours", str(config.ai_scoring_hours))
+    if config.push_hours is not None:
+        db.set_config("auto_push_hours", str(config.push_hours))
+    
+    # Save article config
+    if config.article_dedup_hours is not None:
+        db.set_config("auto_article_dedup_hours", str(config.article_dedup_hours))
+    if config.article_filter_hours is not None:
+        db.set_config("auto_article_filter_hours", str(config.article_filter_hours))
+    if config.article_ai_scoring_hours is not None:
+        db.set_config("auto_article_ai_scoring_hours", str(config.article_ai_scoring_hours))
+    if config.article_push_hours is not None:
+        db.set_config("auto_article_push_hours", str(config.article_push_hours))
+    
+    return {"status": "success", "message": "Auto-pipeline configuration updated"}
 
 
 
@@ -277,6 +367,7 @@ class DeduplicateRequest(BaseModel):
     time_window_hours: int = 24
     action: str = 'mark'  # 'mark' or 'delete'
     threshold: float = 0.50 # 相似度阈值
+    type: str = 'news'  # 'news' or 'article'
 
 class CheckSimilarityRequest(BaseModel):
     news_id_1: int
@@ -295,18 +386,17 @@ async def stop_scraper(name: str, user: User = Depends(get_current_user)):
 async def run_scraper_task(name: str, max_items: int):
     """Refactored scraper runner for background task"""
     logger.info(f"Starting background scrape task for {name}")
-    import datetime
     
     SCRAPER_STATUS[name] = {
         "status": "running", 
-        "start_time": datetime.datetime.now().isoformat(),
+        "start_time": datetime.now().isoformat(),
         "items_scraped": 0,
         "logs": []
     }
     
     import sys
     def log_scraper(msg: str):
-        full_msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}"
+        full_msg = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
         print(f"[{name}] {msg}")
         sys.stdout.flush()
         
@@ -338,7 +428,7 @@ async def run_scraper_task(name: str, max_items: int):
             
         # Prepare Incremental Mode (More Robust)
         db_conn = Database()
-        recent_urls = db_conn.get_recent_news_urls(name, limit=20)
+        recent_urls = db_conn.get_recent_news_urls(scraper.site_name, limit=200)
         
         if recent_urls:
             scraper.existing_urls = set(recent_urls)
@@ -347,7 +437,7 @@ async def run_scraper_task(name: str, max_items: int):
             log_scraper(f"Incremental mode enabled. History size: {len(recent_urls)}. Latest: {recent_urls[0][:30]}...")
         else:
             # Fallback to single latest check if recent list empty (though list includes latest)
-            latest_url = db_conn.get_latest_news_url(name)
+            latest_url = db_conn.get_latest_news_url(scraper.site_name)
             if latest_url:
                 scraper.last_news_url = latest_url
                 scraper.incremental_mode = True
@@ -367,6 +457,7 @@ async def run_scraper_task(name: str, max_items: int):
         for news in news_list:
             if 'source_site' not in news:
                 news['source_site'] = scraper.site_name
+                print(f"[DEBUG] Set source_site = '{news['source_site']}' (from scraper.site_name='{scraper.site_name}')")
             if db_conn.insert_news(news):
                 count_saved += 1
                 log_scraper(f"Saved: {news.get('title', 'Unknown')[:30]}...")
@@ -377,7 +468,7 @@ async def run_scraper_task(name: str, max_items: int):
         
         SCRAPER_STATUS[name].update({
             "status": "idle",
-            "last_run": datetime.datetime.now().isoformat(),
+            "last_run": datetime.now().isoformat(),
             "last_result": f"Scraped {count_scraped}, Saved {count_saved}",
             "last_error": None
         })
@@ -436,9 +527,20 @@ def load_config():
 
 def save_config(config):
     import json
-    CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding='utf-8')
+    CONFIG_FILE.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding='utf-8')
 
+# 加载配置并设置文章爬虫默认值
 SCRAPER_CONFIG = load_config()
+
+# 为文章爬虫设置不同的默认值（如果未配置）
+for name in ARTICLE_SCRAPERS.keys():
+    if name not in SCRAPER_CONFIG:
+        SCRAPER_CONFIG[name] = {
+            "limit": 20,          # 默认抓取20篇
+            "interval": 240       # 默认4小时（240分钟）
+        }
+        save_config(SCRAPER_CONFIG)
+        print(f"✅ 已为 {name} 设置默认配置: limit=20, interval=240min (4小时)")
 
 class ConfigRequest(BaseModel):
     interval: Optional[str] = None # "30", "60", "manual"
@@ -475,9 +577,9 @@ async def deduplicate_news(req: DeduplicateRequest):
         
         # 1. 获取时间范围内的新闻
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === 开始手动去重 ===")
-        print(f"时间窗口: {req.time_window_hours} 小时")
+        print(f"时间窗口: {req.time_window_hours} 小时, 类型: {req.type}")
         
-        news_list = db.get_news_by_time_range(req.time_window_hours)
+        news_list = db.get_news_by_time_range(req.time_window_hours, type_filter=req.type)
         print(f"扫描新闻数量: {len(news_list) if news_list else 0}")
         
         if not news_list:
@@ -768,7 +870,7 @@ async def auto_daily_best_push(force=False):
                 except:
                     score = 0
             
-            if score >= 6:
+            if score >= 5:
                 news_list.append({
                     'title': row['title'],
                     'source_url': row['source_url'],
@@ -896,8 +998,186 @@ async def auto_daily_best_push(force=False):
 
 @app.post("/api/telegram/daily_push")
 async def trigger_daily_push():
-    """手动触发日报推送 (Force Run)"""
+    """手动触发日报推送 (Force Run for News)"""
     return await auto_daily_best_push(force=True)
+
+@app.post("/api/telegram/daily_article_push")
+async def trigger_daily_article_push():
+    """手动触发文章日报推送 (Force Run for Articles)"""
+    return await auto_daily_article_push(force=True)
+
+async def auto_daily_article_push(force=False):
+    """
+    Daily scheduled task to push Articles to Telegram at 21:00 (Beijing Time)
+    Query: Last 24h, Type='article'
+    """
+    try:
+        from datetime import datetime, timedelta
+        # 使用系统配置时区
+        db = Database()
+        now = db.get_system_time()
+        
+        # 1. check time window (Target Time - Target Time + 5min) unless forced
+        if not force:
+            target_time_str = db.get_config('daily_article_push_time') or "21:00"
+            try:
+                target_hour, target_minute = map(int, target_time_str.split(':'))
+            except:
+                target_hour, target_minute = 21, 0
+
+            # 检查时间窗口
+            is_time = (now.hour == target_hour and 
+                       target_minute <= now.minute <= target_minute + 5)
+            
+            if not is_time:
+                return {
+                    "status": "skipped",
+                    "message": f"Not push time (Current: {now.strftime('%H:%M')}, Target: {target_time_str})"
+                }
+
+            # 2. Check if already pushed today
+            today_str = now.strftime('%Y-%m-%d')
+            last_push_date = db.get_config('last_daily_article_push_date')
+            if last_push_date == today_str:
+                return
+
+            logger.info(f"⏰ [Daily Article Push] Starting daily article push for {today_str}")
+        else:
+            logger.info(f"⏰ [Daily Article Push] FORCED execution")
+            db = Database()
+
+        # 3. Fetch articles: Published in last 24h
+        end_time = db.get_system_time()
+        start_time = end_time - timedelta(hours=24)
+        
+        query = """
+            SELECT title, source_url, ai_explanation
+            FROM curated_news 
+            WHERE published_at >= ? 
+            AND type = 'article'
+            AND ai_status IN ('approved', 'rejected') 
+            ORDER BY published_at DESC
+        """
+        # User said "don't check score OR score > 0". 
+        # We select all processed articles (approved or rejected). 
+        # If we really want to filter 'garbage' (score<=0), we can filter in loop.
+        
+        rows = db.execute_query(query, (start_time.strftime('%Y-%m-%d %H:%M:%S'),))
+        
+        # Process and filter in Python
+        news_list = []
+        for row in rows:
+            explanation = row['ai_explanation'] or ""
+            score = 0
+            # Extract score if possible, but for Article default we push unless it's really bad?
+            # User said: "不看AI评分或者你设置分数大于0"
+            # So let's check score > 0.
+            if explanation and '分' in explanation:
+                try:
+                    score = int(explanation.split('分')[0])
+                except:
+                    score = 0
+            
+            if score > 0:
+                news_list.append({
+                    'title': row['title'],
+                    'source_url': row['source_url'],
+                    'score': score
+                })
+        
+        if not news_list:
+            logger.info("⏰ [Daily Article Push] No articles found (Score > 0) in last 24h")
+            if not force:
+                today_str = now.strftime('%Y-%m-%d')
+                db.set_config('last_daily_article_push_date', today_str)
+            return {
+                "status": "skipped",
+                "message": "No articles found"
+            }
+
+        logger.info(f"⏰ [Daily Article Push] Found {len(news_list)} articles")
+
+        # 4. Format Message
+        import html
+        formatted_items = []
+        for news in news_list:
+            title = news.get('title', "No Title")
+            url = news.get('source_url', "")
+            safe_title = html.escape(title)
+            # Format: 📰 <a href="...">Title</a>
+            line = f"📰 <a href=\"{url}\">{safe_title}</a>"
+            formatted_items.append(line)
+
+        # Split into chunks
+        MAX_LENGTH = 3500
+        message_parts = []
+        current_part = []
+        current_length = 0
+        
+        base_header = f"📅 <b>{now.strftime('%Y-%m-%d')} 深度文章日报</b>\n\n"
+        current_length = len(base_header)
+        
+        for item in formatted_items:
+            item_len = len(item) + 2
+            if current_length + item_len > MAX_LENGTH:
+                message_parts.append(current_part)
+                current_part = [item]
+                current_length = item_len
+            else:
+                current_part.append(item)
+                current_length += item_len
+        
+        if current_part:
+            message_parts.append(current_part)
+            
+        # 5. Send
+        from services.telegram_bot import TelegramBot
+        token = db.get_config("telegram_bot_token")
+        chat_id = db.get_config("telegram_chat_id")
+
+        if not token or not chat_id:
+            logger.error("❌ [Daily Article Push] Telegram config missing")
+            return {"status": "error", "message": "Telegram config missing"}
+            
+        bot = TelegramBot(token, chat_id)
+        
+        total_parts = len(message_parts)
+        for i, part_items in enumerate(message_parts, 1):
+            if total_parts > 1:
+                header = f"📅 <b>{now.strftime('%Y-%m-%d')} 深度文章日报 ({i}/{total_parts})</b>\n\n"
+            else:
+                header = base_header
+                
+            full_message = header + "\\n\\n".join(part_items)
+            
+            if i == total_parts:
+                 full_message += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+            
+            success = await bot.send_message(full_message, parse_mode='HTML')
+            if not success:
+                logger.error(f"❌ [Daily Article Push] Failed to send part {i}/{total_parts}")
+            else:
+                logger.info(f"✅ [Daily Article Push] Sent part {i}/{total_parts}")
+            
+            if i < total_parts:
+                await asyncio.sleep(1)
+
+        if not force:
+            today_str = now.strftime('%Y-%m-%d')
+            db.set_config('last_daily_article_push_date', today_str)
+
+        return {
+            "status": "success",
+            "count": len(news_list),
+            "parts": total_parts,
+            "message": f"Pushed {len(news_list)} articles"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [Daily Article Push] Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "error", "message": str(e)}
 
 # ==================== 自动化Pipeline函数 ====================
 
@@ -949,6 +1229,12 @@ async def auto_pipeline_loop():
             
             # 步骤4：逐条推送到Telegram
             await auto_telegram_push()
+
+            # 步骤5：每日精选日报推送 (News >= 6分, 20:00)
+            await auto_daily_best_push()
+            
+            # 步骤6：每日文章日报推送 (Article, 21:00)
+            await auto_daily_article_push()
             
             logger.info("=" * 60)
             logger.info("🤖 [Auto-Pipeline] Cycle completed, waiting for next cycle...")
@@ -1001,7 +1287,7 @@ async def auto_deduplication():
     cutoff_time = (datetime.now() - timedelta(hours=dedup_hours)).strftime('%Y-%m-%d %H:%M:%S')
     
     cursor.execute("""
-        SELECT id, title, content, source_url, source_site, published_at, scraped_at
+        SELECT id, title, content, source_url, source_site, published_at, scraped_at, type
         FROM news 
         WHERE (stage = 'raw' OR stage = 'deduplicated') AND published_at >= ?
         ORDER BY published_at DESC
@@ -1026,7 +1312,8 @@ async def auto_deduplication():
             'source_url': row['source_url'],
             'source_site': row['source_site'],
             'published_at': row['published_at'],
-            'scraped_at': row['scraped_at']
+            'scraped_at': row['scraped_at'],
+            'type': row['type'] if 'type' in row.keys() else 'news'  # 修复: sqlite3.Row 不支持 get
         })
     
     # 使用LocalDeduplicator标记重复
@@ -1050,7 +1337,7 @@ async def auto_deduplication():
             cursor.execute("""
                 INSERT OR IGNORE INTO deduplicated_news 
                 (title, content, source_site, source_url, published_at, scraped_at, deduplicated_at, stage, type, original_news_id)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'deduplicated', 'news', ?)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'deduplicated', ?, ?)
             """, (
                 news['title'],
                 news['content'],
@@ -1058,6 +1345,7 @@ async def auto_deduplication():
                 news['source_url'],
                 news['published_at'],
                 news['scraped_at'],
+                news.get('type', 'news'),  # news 是字典，支持 get
                 news['id']
             ))
             
@@ -1085,32 +1373,46 @@ async def auto_deduplication():
 async def auto_keyword_filter():
     """
     自动关键词过滤
-    使用数据库中配置的黑名单过滤去重后的新闻
+    分别处理新闻和文章，使用各自的配置
     """
     logger.info("🔍 [Auto-Filter] Starting auto keyword filtering...")
     
     db = Database()
     
-    # 从配置读取时间范围，默认24小时
-    filter_hours = int(db.get_config("auto_filter_hours") or 24)
-    logger.info(f"🔍 [Auto-Filter] Using time range: {filter_hours} hours")
+    # 读取新闻和文章的时间范围配置
+    news_filter_hours = int(db.get_config("auto_filter_hours") or 24)
+    article_filter_hours = int(db.get_config("auto_article_filter_hours") or 7*24)
     
     try:
-        # 调用数据库内置的过滤方法
-        # 这个方法会:
-        # 1. 自动从 keyword_blacklist 表加载规则
-        # 2. 扫描 deduplicated_news 表中 deduplicated 状态的新闻
-        # 3. 将通过的新闻移入 curated_news，被过滤的标记为 filtered
-        # 4. 使用配置的时间范围扫描数据
+        # 1. 过滤新闻
+        logger.info(f"🔍 [Auto-Filter] Filtering news (time range: {news_filter_hours} hours)...")
+        news_result = db.filter_news_by_blacklist(time_range_hours=news_filter_hours, type_filter='news')
         
-        result = db.filter_news_by_blacklist(time_range_hours=filter_hours)
+        news_scanned = news_result.get('scanned', 0)
+        news_filtered = news_result.get('filtered', 0)
+        news_curated = news_result.get('curated', 0)
         
-        scanned = result.get('scanned', 0)
-        filtered = result.get('filtered', 0)
-        curated = result.get('curated', 0)
+        if news_scanned > 0:
+            logger.info(f"✅ [Auto-Filter] News: Scanned {news_scanned}, Passed {news_curated}, Filtered {news_filtered}")
         
-        if scanned > 0:
-            logger.info(f"✅ [Auto-Filter] Completed: Scanned {scanned}, Passed {curated}, Filtered {filtered}")
+        # 2. 过滤文章
+        logger.info(f"🔍 [Auto-Filter] Filtering articles (time range: {article_filter_hours} hours)...")
+        article_result = db.filter_news_by_blacklist(time_range_hours=article_filter_hours, type_filter='article')
+        
+        article_scanned = article_result.get('scanned', 0)
+        article_filtered = article_result.get('filtered', 0)
+        article_curated = article_result.get('curated', 0)
+        
+        if article_scanned > 0:
+            logger.info(f"✅ [Auto-Filter] Articles: Scanned {article_scanned}, Passed {article_curated}, Filtered {article_filtered}")
+        
+        # 总结
+        total_scanned = news_scanned + article_scanned
+        total_passed = news_curated + article_curated
+        total_filtered = news_filtered + article_filtered
+        
+        if total_scanned > 0:
+            logger.info(f"✅ [Auto-Filter] Total: Scanned {total_scanned}, Passed {total_passed}, Filtered {total_filtered}")
         else:
             logger.info("🔍 [Auto-Filter] No deduplicated data to process")
             
@@ -1119,51 +1421,84 @@ async def auto_keyword_filter():
 
 
 async def auto_ai_scoring():
-    """自动AI打分：只处理未打分的精选数据"""
+    """
+    自动AI打分：分别处理新闻和文章
+    新闻和文章使用各自的时间范围和提示词配置
+    """
     logger.info("🤖 [Auto-AI] Starting auto AI scoring...")
     
     db = Database()
     
-    # 获取配置
+    # 获取通用配置
     api_key = db.get_config("llm_api_key")
     base_url = db.get_config("llm_base_url") or "https://api.deepseek.com"
     model = db.get_config("llm_model") or "deepseek-chat"
-    filter_prompt = db.get_config("ai_filter_prompt") or "评估新闻价值"
     
     if not api_key:
         logger.warning("⚠️ [Auto-AI] No API key configured, skipping AI scoring")
         return
     
-    # 获取未打分数据，只处理 10 小时内的新闻
+    # 获取新闻和文章的独立配置
+    news_ai_hours = int(db.get_config("auto_ai_scoring_hours") or 12)
+    article_ai_hours = int(db.get_config("auto_article_ai_scoring_hours") or 7*24)
+    
+    news_prompt = db.get_config("ai_filter_prompt") or "评估新闻价值"
+    article_prompt = db.get_config("article_ai_filter_prompt") or "评估文章质量和深度"
+    
+    total_processed = 0
+    
+    # 1. 处理新闻
+    logger.info(f"🤖 [Auto-AI] Processing news (time range: {news_ai_hours} hours, prompt: {news_prompt[:20]}...)")
+    news_processed = await _process_ai_scoring_by_type(
+        db, api_key, base_url, model, 
+        type_filter='news', 
+        time_hours=news_ai_hours, 
+        prompt=news_prompt
+    )
+    total_processed += news_processed
+    
+    # 2. 处理文章
+    logger.info(f"🤖 [Auto-AI] Processing articles (time range: {article_ai_hours} hours, prompt: {article_prompt[:20]}...)")
+    article_processed = await _process_ai_scoring_by_type(
+        db, api_key, base_url, model, 
+        type_filter='article', 
+        time_hours=article_ai_hours, 
+        prompt=article_prompt
+    )
+    total_processed += article_processed
+    
+    logger.info(f"✅ [Auto-AI] Completed: {total_processed} items scored (News: {news_processed}, Articles: {article_processed})")
+
+
+async def _process_ai_scoring_by_type(db: Database, api_key: str, base_url: str, model: str, 
+                                       type_filter: str, time_hours: int, prompt: str) -> int:
+    """
+    处理特定类型的AI打分
+    返回处理的条数
+    """
+    from datetime import timedelta
+    
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 计算时间前的时间（北京时间）
-    from datetime import timedelta
-    
-    # 从配置读取时间范围，默认10小时
-    ai_hours = int(db.get_config("auto_ai_scoring_hours") or 10)
-    
     current_time = db.get_system_time()
-    time_ago = current_time - timedelta(hours=ai_hours)
+    time_ago = current_time - timedelta(hours=time_hours)
     time_ago_str = time_ago.strftime('%Y-%m-%d %H:%M:%S')
     
-    logger.info(f"🤖 [Auto-AI] Using time range: {ai_hours} hours")
-    logger.info(f"🤖 [Auto-AI] Filtering news published after: {time_ago_str} (Beijing Time)")
-    
+    # 查询未打分数据
     cursor.execute("""
         SELECT COUNT(*) FROM curated_news 
         WHERE (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')
         AND published_at >= ?
-    """, (time_ago_str,))
+        AND type = ?
+    """, (time_ago_str, type_filter))
     unscored_count = cursor.fetchone()[0]
     
-    logger.info(f"🤖 [Auto-AI] Found {unscored_count} items to score")
+    logger.info(f"🤖 [Auto-AI] Found {unscored_count} {type_filter} items to score")
     
     if unscored_count == 0:
         conn.close()
-        logger.info("🤖 [Auto-AI] No items to score")
-        return
+        return 0
     
     # 分批处理（每批10条）
     batch_size = 10
@@ -1174,8 +1509,9 @@ async def auto_ai_scoring():
             SELECT id, title FROM curated_news 
             WHERE (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')
             AND published_at >= ?
+            AND type = ?
             LIMIT ? OFFSET ?
-        """, (time_ago_str, batch_size, offset))
+        """, (time_ago_str, type_filter, batch_size, offset))
         
         rows = cursor.fetchall()
         if not rows:
@@ -1186,7 +1522,7 @@ async def auto_ai_scoring():
         # 调用AI
         service = DeepSeekService(api_key, base_url, model)
         try:
-            results = await service.filter_titles(news_items, filter_prompt)
+            results = await service.filter_titles(news_items, prompt)
             
             # 更新数据库
             for item in results:
@@ -1217,7 +1553,7 @@ async def auto_ai_scoring():
                     logger.error(f"⚠️ [Auto-AI] Error updating item {item}: {e}")
             
             conn.commit()
-            logger.info(f"🤖 [Auto-AI] Batch processed: {len(results)} items")
+            logger.info(f"🤖 [Auto-AI] Batch processed: {len(results)} {type_filter} items")
             
         except Exception as e:
             logger.error(f"⚠️ [Auto-AI] Error in batch: {e}")
@@ -1226,7 +1562,7 @@ async def auto_ai_scoring():
         await asyncio.sleep(2)
     
     conn.close()
-    logger.info(f"✅ [Auto-AI] Completed: {processed} items scored")
+    return processed
 
 
 async def auto_telegram_push():
@@ -1243,49 +1579,78 @@ async def auto_telegram_push():
         logger.warning("⚠️ [Auto-Push] Telegram not configured, skipping push")
         return
     
-    # 获取待推送新闻：ai_status='approved' AND (push_status IS NULL OR push_status='pending')
-    # 并且只推送北京时间发布时间N小时内的新闻
+    # 获取待推送新闻和文章，使用各自的时间范围
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 从配置读取时间范围，默认2小时
-    push_hours = int(db.get_config("auto_push_hours") or 12)
+    # 从配置读取新闻和文章的时间范围
+    news_push_hours = int(db.get_config("auto_push_hours") or 12)
+    article_push_hours = int(db.get_config("auto_article_push_hours") or 72)
     
-    # 计算时间前的时间（北京时间）
+    # 计算时间（北京时间）
     from datetime import timedelta
     current_time = db.get_system_time()
-    time_ago = current_time - timedelta(hours=push_hours)
-    time_ago_str = time_ago.strftime('%Y-%m-%d %H:%M:%S')
     
-    logger.info(f"📤 [Auto-Push] Using time range: {push_hours} hours")
-    logger.info(f"📤 [Auto-Push] Filtering news published after: {time_ago_str} (Beijing Time)")
+    news_time_ago = current_time - timedelta(hours=news_push_hours)
+    news_time_ago_str = news_time_ago.strftime('%Y-%m-%d %H:%M:%S')
     
-    # 从ai_explanation中提取分数并筛选≥5分，同时只推送N小时内的新闻
+    article_time_ago = current_time - timedelta(hours=article_push_hours)
+    article_time_ago_str = article_time_ago.strftime('%Y-%m-%d %H:%M:%S')
+    
+    logger.info(f"📤 [Auto-Push] News time range: {news_push_hours} hours (after {news_time_ago_str})")
+    logger.info(f"📤 [Auto-Push] Articles time range: {article_push_hours} hours (after {article_time_ago_str})")
+    
+    # 1. 查询新闻 (≥5分, news_push_hours内)
     cursor.execute("""
-        SELECT id, title, source_url, content, ai_explanation
+        SELECT id, title, source_url, content, ai_explanation, type
         FROM curated_news
-        WHERE ai_status = 'approved'
-        AND (push_status IS NULL OR push_status = 'pending')
+        WHERE (push_status IS NULL OR push_status = 'pending')
         AND published_at >= ?
+        AND type = 'news'
+        AND ai_status = 'approved'
         ORDER BY published_at DESC
-    """, (time_ago_str,))
+    """, (news_time_ago_str,))
+    news_items = cursor.fetchall()
     
-    all_news = cursor.fetchall()
+    # 2. 查询文章 (>0分, article_push_hours内)
+    cursor.execute("""
+        SELECT id, title, source_url, content, ai_explanation, type
+        FROM curated_news
+        WHERE (push_status IS NULL OR push_status = 'pending')
+        AND published_at >= ?
+        AND type = 'article'
+        AND ai_status IN ('approved', 'rejected')
+        AND ai_explanation IS NOT NULL
+        ORDER BY published_at DESC
+    """, (article_time_ago_str,))
+    article_items = cursor.fetchall()
     
-    # 手动筛选≥5分的
+    # 合并所有待推送内容
+    all_news = list(news_items) + list(article_items)
+    
+    # 手动筛选分数
+    # News: ≥5 分
+    # Article: >0 分
     to_push = []
     for news in all_news:
         ai_summary = news[4] or ""
+        type = news[5] or 'news'
+        
         # 尝试从summary中提取分数（格式：8分-xxx）
         try:
             score_str = ai_summary.split('分')[0].strip()
             score = int(score_str)
-            if score >= 5:
-                to_push.append(news)
+            
+            if type == 'news':
+                if score >= 5:
+                    to_push.append(news)
+            elif type == 'article':
+                if score > 0:
+                    to_push.append(news)
         except:
             pass
     
-    logger.info(f"📤 [Auto-Push] Found {len(to_push)} items to push (≥5分)")
+    logger.info(f"📤 [Auto-Push] Found {len(to_push)} items to push (News: {len([n for n in to_push if (n[5] or 'news') == 'news'])}, Articles: {len([n for n in to_push if n[5] == 'article'])})")
     
     if len(to_push) == 0:
         conn.close()
@@ -1315,98 +1680,182 @@ async def auto_telegram_push():
     deduplicator = LocalDeduplicator(similarity_threshold=threshold)
     
     TELEGRAM_FOOTER = """
-<a href="https://0xcheshire.gitbook.io/web3/">币圈新人手册</a>
-注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join/A999998">欧易</a>
+注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join/A999998">欧易</a> <a href="https://0xcheshire.gitbook.io/web3/">新手教程</a>
 Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <a href="https://web3.okx.com/ul/joindex?ref=1234567">OKX</a> <a href="https://link.metamask.io/rewards?referral=36P4HH">小狐狸（刷分）</a>"""
+    # 获取最近已推送的记录（用于查重）
+    # 分别获取新闻和文章的最近记录
+    limit_news = int(db.get_config("dedup_check_count_news") or 30)
+    limit_article = int(db.get_config("dedup_check_count_article") or 100)
+    
+    recent_pushed_news = []
+    recent_pushed_articles = []
+    
+    try:
+        # 获取最近的新闻
+        cursor.execute("""
+            SELECT title FROM curated_news 
+            WHERE push_status = 'sent' AND (type = 'news' OR type IS NULL)
+            ORDER BY pushed_at DESC LIMIT ?
+        """, (limit_news,))
+        recent_pushed_news = cursor.fetchall()
 
+        # 获取最近的文章
+        cursor.execute("""
+            SELECT title FROM curated_news 
+            WHERE push_status = 'sent' AND type = 'article'
+            ORDER BY pushed_at DESC LIMIT ?
+        """, (limit_article,))
+        recent_pushed_articles = cursor.fetchall()
+        
+    except Exception as e:
+        logger.error(f"⚠️ [Auto-Push] Failed to fetch recent pushed history: {e}")
+    
+    # 合并查重列表，但在循环中我们可以根据类型选择对比哪个列表
+    # 为简单起见，且LocalDeduplicator是通用的，我们可以构建两个Deduplicator或者在循环中决定
+    # 但Deduplicator本身没有状态，只是方法。
+    # 我们可以把查重列表分开传给查重逻辑
+    
+    news_to_send = []
+    
     bot = TelegramBot(token, chat_id)
-    success_count = 0
+    
+    # 收集所有通过查重的新闻
+    news_to_send = []
     
     for news in to_push:
-        news_id, title, url, content, ai_summary = news
+        news_id, title, url, content, ai_summary, type = news
+        type = type or 'news'
         
-        # 🛡️ 最后的防线：检查是否与最近推送的新闻重复
+        # 确定使用哪个查重列表
+        if type == 'article':
+            check_against = recent_pushed_articles
+            check_limit_log = limit_article
+        else:
+            check_against = recent_pushed_news
+            check_limit_log = limit_news
+            
+        # 🛡️ 查重检查
         is_duplicate = False
-        for pushed in recent_pushed:
+        for pushed in check_against:
             pushed_title = pushed[0]
-            # 使用阈值检查（需要先提取特征）
             title_features = deduplicator.extract_features(title)
             pushed_features = deduplicator.extract_features(pushed_title)
             if deduplicator.calculate_similarity(title_features, pushed_features) >= deduplicator.similarity_threshold:
                 logger.warning(f"🛡️ [Auto-Push] Prevented duplicate push: {title[:30]}... (Similar to pushed: {pushed_title[:30]}...)")
-                
-                # 标记该新闻为 duplicate (防止重复骚扰)
                 is_duplicate = True
                 
-                # 关键修复：同步更新数据库状态，这样前端刷新时就能看到它是重复的
+                # 标记为重复
                 try:
-                    # 找到对应的主新闻ID（根据title）
                     cursor.execute("SELECT id FROM news WHERE title = ? LIMIT 1", (pushed_title,))
                     parent_row = cursor.fetchone()
                     if parent_row:
                         parent_id = parent_row[0]
-                        # 更新当前新闻状态
                         cursor.execute("""
                             UPDATE news 
                             SET duplicate_of = ?, is_local_duplicate = 1, stage = 'deduplicated'
                             WHERE id = ?
                         """, (parent_id, news_id))
-                        # 如果已经在curated_news中，也可能需要标记为rejected或删除？
-                        # 目前先只更新news表，保证去重列表中能看到
+                        
+                        # 关键修复：同时更新 curated_news 表，防止下次循环再次被选中
+                        cursor.execute("""
+                            UPDATE curated_news 
+                            SET push_status = 'duplicate'
+                            WHERE id = ?
+                        """, (news_id,))
+                        
                         conn.commit()
-                        logger.info(f"   ↳ Marked news {news_id} as duplicate of {parent_id} in DB")
+                        logger.info(f"   ↳ Marked news {news_id} as duplicate of {parent_id} in DB (and skipped push)")
                 except Exception as e:
                     logger.error(f"   ↳ Failed to update DB status for duplicate: {e}")
-                
                 break
         
-        if is_duplicate:
-            continue
+        if not is_duplicate:
+            news_to_send.append((news_id, title, url, content, type))
+    
+    # 如果没有要推送的新闻，直接返回
+    if len(news_to_send) == 0:
+        conn.close()
+        logger.info("✅ [Auto-Push] Completed: 0/0 items pushed")
+        return
+    
+    # 分批构建和发送消息
+    # Telegram 限制：4096 字符，我们留出安全余量使用 4000
+    MAX_MESSAGE_LENGTH = 4000
+    FOOTER_LENGTH = len(TELEGRAM_FOOTER)
+    
+    # 将新闻分组，每组不超过字符限制
+    message_batches = []
+    current_batch = []
+    current_length = FOOTER_LENGTH  # 初始长度包含页脚
+    
+    for news_id, title, url, content, type in news_to_send:
+        escaped_title = html_lib.escape(title)
+        
+        if type == 'article':
+             news_line = f'📰 <b><a href="{url}">{escaped_title}</a></b>'
+        else:
+             # 快讯：⚡ Emoji，Title Only (No Content)
+             news_line = f'⚡ <b><a href="{url}">{escaped_title}</a></b>'
+
+        news_line_length = len(news_line) + 2  # +2 for '\n\n'
+        
+        # 检查添加这条新闻是否会超出限制
+        if current_length + news_line_length > MAX_MESSAGE_LENGTH:
+            # 当前批次已满，保存并开始新批次
+            if current_batch:  # 确保当前批次不为空
+                message_batches.append(current_batch)
+            current_batch = [(news_id, title, url, content, type)]
+            current_length = news_line_length + FOOTER_LENGTH
+        else:
+            current_batch.append((news_id, title, url, content, type))
+            current_length += news_line_length
+    
+    # 添加最后一批
+    if current_batch:
+        message_batches.append(current_batch)
+    
+    # 逐批发送消息
+    total_sent = 0
+    for batch_index, batch in enumerate(message_batches, 1):
+        # 构建当前批次的消息
+        news_lines = []
+        for _, title, url, content, type in batch:
+            # HTML转义
+            escaped_title = html_lib.escape(title)
+            
+            if type == 'article':
+                 # 文章：📰 Emoji，Title Only
+                 news_lines.append(f'📰 <b><a href="{url}">{escaped_title}</a></b>')
+            else:
+                 # 快讯：⚡ Emoji，Title Only (No Content)
+                 # Reverting to original behavior as requested
+                 news_lines.append(f'⚡ <b><a href="{url}">{escaped_title}</a></b>')
+
+        message = '\n\n'.join(news_lines) + f'\n{TELEGRAM_FOOTER}'
         
         try:
-            # 构建消息
-            escaped_title = html_lib.escape(title)
-            escaped_content = html_lib.escape(content or '')
-            
-            # 限制内容长度
-            if len(escaped_content) > 500:
-                escaped_content = escaped_content[:500] + '...'
-            
-            message = f'<b><a href="{url}">{escaped_title}</a></b>\n\n{escaped_content}\n{TELEGRAM_FOOTER}'
-            
-            # 发送
             success = await bot.send_message(message, parse_mode='HTML')
             
             if success:
-                # 标记为已推送
-                cursor.execute("""
+                # 批量更新当前批次新闻的状态
+                batch_news_ids = [news[0] for news in batch]
+                placeholders = ','.join('?' * len(batch_news_ids))
+                cursor.execute(f"""
                     UPDATE curated_news 
                     SET push_status = 'sent', pushed_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (news_id,))
+                    WHERE id IN ({placeholders})
+                """, batch_news_ids)
                 conn.commit()
                 
-                success_count += 1
-                logger.info(f"✅ [Auto-Push] Sent ({success_count}/{len(to_push)}): {title[:40]}...")
-                
-                # 关键修复：将刚推送成功的标题也加入到 recent_pushed，
-                # 这样同一批次中后面的新闻就能检测到它了，防止"自相残杀"或漏判
-                recent_pushed.append((title,))
-                
+                total_sent += len(batch)
+                logger.info(f"✅ [Auto-Push] Batch {batch_index}/{len(message_batches)}: Sent {len(batch)} items")
             else:
-                logger.error(f"❌ [Auto-Push] Failed to send: {title[:40]}...")
-            
-            # 随机延迟30-60秒
-            delay = random.randint(30, 60)
-            logger.info(f"⏳ [Auto-Push] Waiting {delay}s before next push...")
-            await asyncio.sleep(delay)
-            
+                logger.error(f"❌ [Auto-Push] Batch {batch_index}/{len(message_batches)}: Failed to send")
         except Exception as e:
-            logger.error(f"❌ [Auto-Push] Error pushing {title[:40]}: {e}")
-            await asyncio.sleep(30)
+            logger.error(f"❌ [Auto-Push] Batch {batch_index}/{len(message_batches)}: Error sending message: {e}")
     
+    logger.info(f"✅ [Auto-Push] Completed: {total_sent}/{len(news_to_send)} items pushed in {len(message_batches)} batch(es)")
     conn.close()
-    logger.info(f"✅ [Auto-Push] Completed: {success_count}/{len(to_push)} items pushed")
 
 # ==================== End of Auto-Pipeline ====================
 
@@ -1445,9 +1894,25 @@ async def run_spider(name: str, background_tasks: BackgroundTasks, req: RunScrap
 
 @app.get("/api/spiders")
 def get_spiders():
-    """List all available spiders"""
+    """List all available spiders with their types and display names"""
+    spiders_with_types = []
+    for name, scraper_cls in SCRAPER_MAP.items():
+        # 实例化爬虫获取 site_name
+        try:
+            scraper = scraper_cls()
+            display_name = scraper.site_name
+        except:
+            # 如果实例化失败，使用ID作为备用
+            display_name = name
+        
+        spiders_with_types.append({
+            "name": name,
+            "display_name": display_name,
+            "type": SCRAPER_TYPES.get(name, 'news')
+        })
+    
     return {
-        "spiders": list(SCRAPER_MAP.keys())
+        "spiders": spiders_with_types
     }
 
 
@@ -1468,12 +1933,15 @@ def read_root():
     return {"message": "Welcome to AINews Admin API"}
 
 @app.get("/api/stats")
-def get_stats():
-    """Get crawling stats for today"""
+def get_stats(type: str = 'news'):
+    """Get crawling stats by content type"""
     try:
         conn = db.connect()
         cursor = conn.cursor()
-        cursor.execute("SELECT source_site, count(*) as count FROM news GROUP BY source_site")
+        cursor.execute(
+            "SELECT source_site, count(*) as count FROM news WHERE type = ? GROUP BY source_site", 
+            (type,)
+        )
         rows = cursor.fetchall()
         conn.close()
         
@@ -1484,7 +1952,7 @@ def get_stats():
 
 @app.get("/api/news")
 @app.get("/api/news")
-def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None, keyword: Optional[str] = None):
+def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage: Optional[str] = None, keyword: Optional[str] = None, type: Optional[str] = 'news'):
     """Get news list with pagination"""
     try:
         conn = db.connect()
@@ -1501,13 +1969,31 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         """
         params = []
         
+        
         if source:
+            # 将爬虫ID转换为对应的site_name用于查询
+            # 前端传递的是爬虫ID（如'blockbeats_article'），需要转换为site_name（如'BlockBeats Article'）
+            if source in SCRAPER_MAP:
+                try:
+                    scraper = SCRAPER_MAP[source]()
+                    source_site = scraper.site_name
+                except:
+                    source_site = source  # 转换失败，使用原值
+            else:
+                source_site = source  # 不在映射中，使用原值
+            
             query += " AND n.source_site = ?"
-            params.append(source)
+            params.append(source_site)
         
         if stage:
             query += " AND n.stage = ?"
             params.append(stage)
+            
+        # Filter by type (default to 'news')
+        # Frontend explicitly passes 'news' or 'article' or other types
+        if type:
+            query += " AND n.type = ?"
+            params.append(type)
         
         if keyword:
             query += " AND (n.title LIKE ? OR n.content LIKE ?)"
@@ -1530,6 +2016,9 @@ def get_news(page: int = 1, limit: int = 50, source: Optional[str] = None, stage
         if stage:
             count_query += " AND n.stage = ?"
             count_params.append(stage)
+        if type:
+            count_query += " AND n.type = ?"
+            count_params.append(type)
         if keyword:
             count_query += " AND (n.title LIKE ? OR n.content LIKE ?)"
             term = f"%{keyword}%"
@@ -1568,9 +2057,9 @@ def delete_news(news_id: int, user: User = Depends(get_current_user)):
     raise NotFoundError("新闻不存在或删除失败")
 
 @app.get("/api/deduplicated/news")
-def get_deduplicated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
-    """获取已去重的数据"""
-    result = db.get_deduplicated_news(page, limit, source, keyword)
+def get_deduplicated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None, type: Optional[str] = 'news', stage: Optional[str] = None):
+    """获取已去重的数据 (支持 stage 筛选: deduplicated, filtered, verified)"""
+    result = db.get_deduplicated_news(page, limit, source, keyword, type_filter=type, stage=stage)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -1593,91 +2082,87 @@ def delete_deduplicated_news(news_id: int, user: User = Depends(get_current_user
     raise NotFoundError("数据不存在或删除失败")
 
 @app.post("/api/deduplicated/batch_restore_all")
-async def batch_restore_all_deduplicated(user: User = Depends(get_current_user)):
-    """批量还原所有去重数据到 raw 状态"""
+async def batch_restore_all_deduplicated(type: str = 'news', user: User = Depends(get_current_user)):
+    """批量还原所有去重数据到 raw 状态 (支持类型筛选)"""
     db_instance = Database()
     try:
         conn = db_instance.connect()
         cursor = conn.cursor()
         
-        # 查询所有 deduplicated_news 记录
-        cursor.execute("""
-            SELECT id, original_news_id 
-            FROM deduplicated_news
-        """)
-        rows = cursor.fetchall()
-        processed_count = len(rows)
-        
-        if processed_count > 0:
-            # 收集所有 original_news_id
-            news_ids = [row[1] for row in rows if row[1] is not None]
-            
-            # 将对应的 news 记录的 stage 改回 'raw'
-            if news_ids:
-                placeholders = ','.join('?' * len(news_ids))
-                cursor.execute(f"""
-                    UPDATE news 
-                    SET stage = 'raw'
-                    WHERE id IN ({placeholders})
-                """, news_ids)
-            
-            # 删除所有 deduplicated_news 记录
-            cursor.execute("DELETE FROM deduplicated_news")
-            
-            # 删除 curated_news 中对应的记录，但保留已 AI 打标（approved/rejected）的数据
-            if news_ids:
-                cursor.execute(f"""
-                    DELETE FROM curated_news 
-                    WHERE original_news_id IN ({placeholders})
-                    AND (ai_status IS NULL OR ai_status NOT IN ('approved', 'rejected'))
-                """, news_ids)
-        
-        # ----------------------------------------------------------------
-        # 新增：同时重置都被标记为 Duplicate 的新闻 (真正的"撤销去重")
+        # 1. 还原仅处于 'deduplicated' 状态的新闻 (不影响 curated/filtered)
+        cursor.execute("UPDATE news SET stage = 'raw' WHERE stage = 'deduplicated' AND type = ?", (type,))
+        restored_count = cursor.rowcount
+
+        # 2. 还原处于 'duplicate' 状态的新闻 (清空重复对照)
         cursor.execute("""
             UPDATE news 
-            SET stage = 'raw', 
-                is_duplicate = 0, 
-                duplicate_of = NULL
-            WHERE stage = 'duplicate'
-        """)
-        reset_duplicates_count = cursor.rowcount
+            SET stage = 'raw', is_duplicate = 0, duplicate_of = NULL 
+            WHERE (stage = 'duplicate' OR is_duplicate = 1) AND type = ?
+        """, (type,))
+        restored_duplicates = cursor.rowcount
+        
+        # 3. 清理 deduplicated_news 表 (完全清空，不保留任何数据)
+        # 注意：deduplicated_news 表中也应该有 type 字段才行。如果不区分 type，清空会误删。
+        # 如果 deduplicated_news 没有 type 字段，我们暂时只能全部清空，或者不做这一步。
+        # 检查 deduplicated_news 表结构，如果有 type 则加条件。没有则全删会有副作用。
+        # 假设 deduplicated_news 仅作为归档查看，清空影响不大。但为了严谨应该加条件。
+        # 暂时先不加 type 条件删除 deduplicated_news，避免报错 (如果表没type字段)
+        # 但这会导致查看"已去重"列表时，清空操作会清空所有类型的归档记录。
+        # 考虑到用户需求是隔离操作，建议 deduplicated_news 也需要 type。
+        # 这里先只还原 news 表的状态，deduplicated_news 表暂时全清空 (或者先check一下)
+        
+        # 更好的策略：根据 ids 来删。
+        # 既然我们已经 update 了 news 表，那 deduplicated_news 表里对应的数据就失效了。
+        # 但 deduplicated_news 是 news 的副本吗？ db.archive_to_deduplicated 是 INSERT INTO ... SELECT FROM news
+        # 是的一份拷贝。
+        # 如果不删 deduplicated_news，前端"已去重"列表还会显示。
+        # 让我们尝试按 type 删除 (假设 deduplicated_news 也有 type，因为它是从 news 表复制过去的)
+        try:
+            cursor.execute("DELETE FROM deduplicated_news WHERE type = ?", (type,))
+        except Exception:
+            # 如果没有 type 字段，回退到清空 (虽然不完美，但能工作)
+            # 或者不删？
+            pass
             
         conn.commit()
         conn.close()
         
-        total_restored = processed_count + reset_duplicates_count
-        
         return APIResponse.success(
-            data={"restored_count": total_restored, "archived_restored": processed_count, "duplicates_reset": reset_duplicates_count},
-            message=f"成功还原 {processed_count} 条归档数据，并重置了 {reset_duplicates_count} 条重复数据"
+            data={"restored_count": restored_count + restored_duplicates},
+            message=f"批量还原成功！已重置 {restored_count} 条去重数据和 {restored_duplicates} 条重复数据 (保留了已过滤/精选数据)"
         )
     except Exception as e:
-        logger.error(f"批量还原去重数据失败: {e}")
+        logger.error(f"批量还原失败: {e}")
         raise DatabaseError(f"批量还原失败: {str(e)}")
 
 @app.post("/api/filtered/batch_restore_all")
-async def batch_restore_all_filtered(user: User = Depends(get_current_user)):
-    """批量还原已过滤和已精选的数据，重新执行本地过滤"""
+async def batch_restore_all_filtered(type: str = 'news', user: User = Depends(get_current_user)):
+    """批量还原已过滤和已精选的数据，重新执行本地过滤 (支持类型)"""
     db_instance = Database()
     try:
         conn = db_instance.connect()
         cursor = conn.cursor()
         
-        # 查询需要还原的数据数量（filtered + curated）
-        cursor.execute("SELECT COUNT(*) FROM deduplicated_news WHERE stage IN ('filtered', 'curated')")
+        # 查询需要还原的数据数量（filtered + verified + curated）
+        cursor.execute("SELECT COUNT(*) FROM deduplicated_news WHERE stage IN ('filtered', 'verified', 'curated') AND type = ?", (type,))
         restore_count = cursor.fetchone()[0]
         
         if restore_count > 0:
-            # 将 filtered 和 curated 都改回 deduplicated
+            # 将 filtered, verified 和 curated 都改回 deduplicated
             cursor.execute("""
                 UPDATE deduplicated_news 
-                SET stage = 'deduplicated'
-                WHERE stage IN ('filtered', 'curated')
-            """)
+                SET stage = 'deduplicated', keyword_filter_reason = NULL
+                WHERE stage IN ('filtered', 'verified', 'curated') AND type = ?
+            """, (type,))
             
-            # 清空 curated_news 表
-            cursor.execute("DELETE FROM curated_news")
+            # 清空 curated_news 表 (如果之前的 Verified 数据被自动加精了，这里也会清空)
+            # cursor.execute("DELETE FROM curated_news") 
+            # 暂时注释掉清空 curated_news，防止误删用户手动加精的数据。
+            # 但用户意图是重置过滤，如果 verified 变回 deduplicated，
+            # 那么 curated_news 里对应的记录若不删，可能会导致数据不一致（源头变了）。
+            # 不过根据最新逻辑，verified 不自动进 curated_news。
+            # 为了安全，我们只重置 deduplicated_news 里的状态。
+            pass
             
             conn.commit()
         
@@ -1692,9 +2177,9 @@ async def batch_restore_all_filtered(user: User = Depends(get_current_user)):
         raise DatabaseError(f"批量还原失败: {str(e)}")
 
 @app.get("/api/curated/news")
-def get_curated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
+def get_curated_news_api(page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None, type: Optional[str] = 'news', ai_status: Optional[str] = None):
     """获取精选数据"""
-    result = db.get_curated_news(page, limit, source, keyword)
+    result = db.get_curated_news(page, limit, source, keyword, type_filter=type, ai_status=ai_status)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -1732,25 +2217,28 @@ def restore_news_api(news_id: int, req: RestoreRequest, user: User = Depends(get
 class AIFilterRequest(BaseModel):
     hours: int = 8
     filter_prompt: str
+    type: str = 'news'
 
 class AIConfig(BaseModel):
     prompt: Optional[str] = None
     hours: Optional[int] = 8
 
 @app.get("/api/ai/config")
-def get_ai_config():
-    """获取AI配置"""
-    prompt = db.get_config("ai_filter_prompt") or ""
+def get_ai_config(type: str = 'news'):
+    """获取AI配置（按类型）"""
+    config_key = f"ai_filter_prompt_{type}"
+    prompt = db.get_config(config_key) or ""
     hours = db.get_config("ai_filter_hours")
     return APIResponse.success(
-        data={"prompt": prompt, "hours": int(hours) if hours else 8}
+        data={"prompt": prompt, "hours": int(hours) if hours else 8, "type": type}
     )
 
 @app.post("/api/ai/config")
-def set_ai_config(config: AIConfig, user: User = Depends(get_current_user)):
-    """设置AI配置"""
+def set_ai_config(config: AIConfig, type: str = 'news', user: User = Depends(get_current_user)):
+    """设置AI配置（按类型）"""
     if config.prompt is not None:
-        db.set_config("ai_filter_prompt", config.prompt)
+        config_key = f"ai_filter_prompt_{type}"
+        db.set_config(config_key, config.prompt)
     if config.hours is not None:
         db.set_config("ai_filter_hours", str(config.hours))
     return APIResponse.success(message="配置已保存")
@@ -1782,10 +2270,11 @@ async def ai_filter_curated(req: AIFilterRequest, user: User = Depends(get_curre
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 首先获取总数 - 只处理未筛选的数据(pending或NULL)
+    # 首先获取总数 - 只处理未筛选的数据(pending或NULL) AND type match
+    type_filter = getattr(req, 'type', 'news') or 'news'
     cursor.execute(
-        "SELECT COUNT(*) FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending')",
-        (cutoff_time,)
+        "SELECT COUNT(*) FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') AND type = ?",
+        (cutoff_time, type_filter)
     )
     total_count = cursor.fetchone()[0]
     print(f"[DEBUG] AI Filter: Found {total_count} items to process")
@@ -1801,9 +2290,12 @@ async def ai_filter_curated(req: AIFilterRequest, user: User = Depends(get_curre
     batch_size = getattr(req, 'batch_size', 10)
     offset = getattr(req, 'offset', 0)
     
+    # Add type filtering
+    type_filter = getattr(req, 'type', 'news') or 'news'
+    
     cursor.execute(
-        "SELECT id, title FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') LIMIT ? OFFSET ?",
-        (cutoff_time, batch_size, offset)
+        "SELECT id, title FROM curated_news WHERE published_at >= ? AND (ai_status IS NULL OR ai_status = '' OR ai_status = 'pending') AND type = ? LIMIT ? OFFSET ?",
+        (cutoff_time, type_filter, batch_size, offset)
     )
     rows = cursor.fetchall()
     conn.close()
@@ -1855,7 +2347,8 @@ async def ai_filter_curated(req: AIFilterRequest, user: User = Depends(get_curre
                 tag = resolution.get('tag', '')
                 
                 # 阈值判断：>=6分为approved，<6分为rejected
-                if score >= 6:
+                # 阈值判断：>=5分为approved，<5分为rejected
+                if score >= 5:
                     new_status = 'approved'
                 else:
                     new_status = 'rejected'
@@ -1900,15 +2393,15 @@ async def ai_filter_curated(req: AIFilterRequest, user: User = Depends(get_curre
 
 
 @app.post("/api/curated/batch_restore")
-async def batch_restore_rejected(user: User = Depends(get_current_user)):
-    """批量还原所有被拒绝的数据"""
+async def batch_restore_rejected(type: str = 'news', user: User = Depends(get_current_user)):
+    """批量还原所有被拒绝的数据 (支持类型)"""
     db = Database()
     try:
         conn = db.connect()
         cursor = conn.cursor()
         
         # 查询被拒绝的数据数量
-        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status = 'rejected'")
+        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status = 'rejected' AND type = ?", (type,))
         rejected_count = cursor.fetchone()[0]
         
         if rejected_count > 0:
@@ -1916,8 +2409,8 @@ async def batch_restore_rejected(user: User = Depends(get_current_user)):
             cursor.execute("""
                 UPDATE curated_news 
                 SET ai_status = 'pending', ai_explanation = NULL 
-                WHERE ai_status = 'rejected'
-            """)
+                WHERE ai_status = 'rejected' AND type = ?
+            """, (type,))
             conn.commit()
         
         conn.close()
@@ -1932,15 +2425,15 @@ async def batch_restore_rejected(user: User = Depends(get_current_user)):
 
 
 @app.post("/api/curated/clear_all_ai_status")
-async def clear_all_ai_status(user: User = Depends(get_current_user)):
-    """清空所有 AI 筛选状态"""
+async def clear_all_ai_status(type: str = 'news', user: User = Depends(get_current_user)):
+    """清空所有 AI 筛选状态 (支持类型)"""
     db = Database()
     try:
         conn = db.connect()
         cursor = conn.cursor()
         
         # 查询所有有 AI 状态的数据
-        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status IS NOT NULL AND ai_status != ''")
+        cursor.execute("SELECT COUNT(*) FROM curated_news WHERE ai_status IS NOT NULL AND ai_status != '' AND type = ?", (type,))
         total_count = cursor.fetchone()[0]
         
         if total_count > 0:
@@ -1948,8 +2441,8 @@ async def clear_all_ai_status(user: User = Depends(get_current_user)):
             cursor.execute("""
                 UPDATE curated_news 
                 SET ai_status = NULL, ai_explanation = NULL 
-                WHERE ai_status IS NOT NULL AND ai_status != ''
-            """)
+                WHERE ai_status IS NOT NULL AND ai_status != '' AND type = ?
+            """, (type,))
             conn.commit()
         
         conn.close()
@@ -1965,7 +2458,7 @@ async def clear_all_ai_status(user: User = Depends(get_current_user)):
 
 
 @app.get("/api/curated/export")
-async def get_export_news(hours: int = 24, min_score: int = 6):
+async def get_export_news(hours: int = 24, min_score: int = 5, type: str = 'news'):
     """获取可导出的新闻列表（所有被AI评分的数据）"""
     db = Database()
     try:
@@ -1975,19 +2468,20 @@ async def get_export_news(hours: int = 24, min_score: int = 6):
         # 查询所有被AI评分的数据（approved + rejected）
         if hours ==0:
             # "全部时间" - 不限制时间范围
-            logger.info("查询时间范围: 全部时间 (无限制)")
+            logger.info(f"查询时间范围: 全部时间 (无限制), type={type}")
             cursor.execute("""
                 SELECT id, title, content, source_url, source_site, ai_status, ai_explanation, curated_at, published_at
                 FROM curated_news 
                 WHERE ai_status IN ('approved', 'rejected')
                 AND ai_explanation IS NOT NULL
-            """)
+                AND type = ?
+            """, (type,))
         else:
             # 计算时间范围 - 使用系统配置时间
             cutoff_time = db.get_system_time() - timedelta(hours=hours)
             cutoff_time_str = cutoff_time.strftime('%Y-%m-%d %H:%M:%S')
             
-            logger.info(f"查询时间范围: >= {cutoff_time_str} (Published)")
+            logger.info(f"查询时间范围: >= {cutoff_time_str} (Published), type={type}")
             
             cursor.execute("""
                 SELECT id, title, content, source_url, source_site, ai_status, ai_explanation, curated_at, published_at
@@ -1995,7 +2489,8 @@ async def get_export_news(hours: int = 24, min_score: int = 6):
                 WHERE published_at >= ? 
                 AND ai_status IN ('approved', 'rejected')
                 AND ai_explanation IS NOT NULL
-            """, (cutoff_time_str,))
+                AND type = ?
+            """, (cutoff_time_str, type))
         
         rows = cursor.fetchall()
         conn.close()
@@ -2058,12 +2553,12 @@ def restore_curated_news_api(news_id: int):
 
 
 @app.get("/api/curated/filtered")
-def get_filtered_curated(status: str, page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None):
+def get_filtered_curated(status: str, page: int = 1, limit: int = 50, source: Optional[str] = None, keyword: Optional[str] = None, type: Optional[str] = 'news'):
     """获取筛选后的精选数据 (approved 或 rejected)"""
     db = Database()
     if status not in ['approved', 'rejected']:
         raise ValidationError("status 必须是 'approved' 或 'rejected'")
-    result = db.get_filtered_curated_news(status, page, limit, source, keyword)
+    result = db.get_filtered_curated_news(status, page, limit, source, keyword, type_filter=type)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -2072,8 +2567,8 @@ def get_filtered_curated(status: str, page: int = 1, limit: int = 50, source: Op
     )
 
 @app.get("/api/filtered/dedup/news")
-def get_filtered_dedup_news_api(page: int = 1, limit: int = 50, keyword: Optional[str] = None):
-    result = db.get_filtered_dedup_news(page, limit, keyword)
+def get_filtered_dedup_news_api(page: int = 1, limit: int = 50, keyword: Optional[str] = None, type: Optional[str] = 'news'):
+    result = db.get_filtered_dedup_news(page, limit, keyword, type_filter=type)
     return APIResponse.paginated(
         data=result['data'],
         total=result['total'],
@@ -2084,17 +2579,19 @@ def get_filtered_dedup_news_api(page: int = 1, limit: int = 50, keyword: Optiona
 # --- Blacklist APIs ---
 
 @app.get("/api/blacklist")
-def get_blacklist():
-    return APIResponse.success(data={"keywords": db.get_blacklist_keywords()})
+def get_blacklist(type: str = 'news'):
+    """获取指定类型的黑名单关键词"""
+    return APIResponse.success(data={"keywords": db.get_blacklist_keywords(type)})
 
 class AddBlacklistRequest(BaseModel):
     keyword: str
     match_type: str = 'contains'
+    type: str = 'news'
 
 @app.post("/api/blacklist")
 def add_blacklist(req: AddBlacklistRequest, user: User = Depends(get_current_user)):
     """添加黑名单关键词"""
-    success = db.add_blacklist_keyword(req.keyword, req.match_type)
+    success = db.add_blacklist_keyword(req.keyword, req.match_type, req.type)
     if success:
         return APIResponse.success(message="添加成功")
     raise BusinessError("添加失败，可能关键词已存在")
@@ -2113,35 +2610,55 @@ class AutoPipelineConfigRequest(BaseModel):
     dedup_hours: int = Field(ge=1, le=72, description="去重时间范围（小时）")
     filter_hours: int = Field(ge=1, le=72, description="过滤时间范围（小时）")
     ai_scoring_hours: int = Field(ge=1, le=72, description="AI打分时间范围（小时）")
-    push_hours: int = Field(ge=1, le=72, description="推送时间范围（小时)")
+    push_hours: int = Field(ge=1, le=72, description="推送时间范围（小时)")  
+    article_dedup_hours: int = Field(default=2, ge=1, le=72, description="文章去重时间范围")
+    article_filter_hours: int = Field(default=24, ge=1, le=72, description="文章过滤时间范围")
+    article_ai_scoring_hours: int = Field(default=12, ge=1, le=72, description="文章AI打分时间范围")
+    article_push_hours: int = Field(default=12, ge=1, le=72, description="文章推送时间范围")
 
 @app.get("/api/config/auto_pipeline")
 async def get_auto_pipeline_config():
-    """获取自动化流程配置"""
+    """获取自动化流程配置（包括快讯和文章）"""
     return APIResponse.success(data={
+        # News config
         "dedup_hours": int(db.get_config("auto_dedup_hours") or 2),
         "filter_hours": int(db.get_config("auto_filter_hours") or 24),
         "ai_scoring_hours": int(db.get_config("auto_ai_scoring_hours") or 10),
         "push_hours": int(db.get_config("auto_push_hours") or 12),
+        # Article config
+        "article_dedup_hours": int(db.get_config("article_auto_dedup_hours") or 2),
+        "article_filter_hours": int(db.get_config("article_auto_filter_hours") or 24),
+        "article_ai_scoring_hours": int(db.get_config("article_auto_ai_scoring_hours") or 10),
+        "article_push_hours": int(db.get_config("article_auto_push_hours") or 12),
     })
 
 @app.post("/api/config/auto_pipeline")
 async def set_auto_pipeline_config(req: AutoPipelineConfigRequest, user: User = Depends(get_current_user)):
-    """设置自动化流程配置"""
+    """设置自动化流程配置（包括快讯和文章）"""
+    # News config
     db.set_config("auto_dedup_hours", str(req.dedup_hours))
     db.set_config("auto_filter_hours", str(req.filter_hours))
     db.set_config("auto_ai_scoring_hours", str(req.ai_scoring_hours))
     db.set_config("auto_push_hours", str(req.push_hours))
-    logger.info(f"Auto-pipeline config updated: dedup={req.dedup_hours}h, filter={req.filter_hours}h, AI={req.ai_scoring_hours}h, push={req.push_hours}h")
+    
+    # Article config
+    db.set_config("article_auto_dedup_hours", str(req.article_dedup_hours))
+    db.set_config("article_auto_filter_hours", str(req.article_filter_hours))
+    db.set_config("article_auto_ai_scoring_hours", str(req.article_ai_scoring_hours))
+    db.set_config("article_auto_push_hours", str(req.article_push_hours))
+    
+    logger.info(f"Auto-pipeline config updated - News: dedup={req.dedup_hours}h, filter={req.filter_hours}h, AI={req.ai_scoring_hours}h, push={req.push_hours}h")
+    logger.info(f"Auto-pipeline config updated - Article: dedup={req.article_dedup_hours}h, filter={req.article_filter_hours}h, AI={req.article_ai_scoring_hours}h, push={req.article_push_hours}h")
     return APIResponse.success(message="配置已保存")
 
 class FilterRequest(BaseModel):
     time_range_hours: int = 24
+    type: str = 'news'
 
 @app.post("/api/news/filter")
 def filter_news(req: FilterRequest, user: User = Depends(get_current_user)):
     """根据黑名单执行过滤"""
-    result = db.filter_news_by_blacklist(req.time_range_hours)
+    result = db.filter_news_by_blacklist(req.time_range_hours, type_filter=req.type)
     return APIResponse.success(data={"stats": result})
 
 class LoginRequest(BaseModel):
@@ -2244,7 +2761,7 @@ async def send_news_to_telegram(request: TelegramSendRequest, user: User = Depen
     
     placeholders = ','.join(['?' for _ in request.news_ids])
     query = f'''
-        SELECT id, title, source_url, content
+        SELECT id, title, source_url, content, type
         FROM curated_news
         WHERE id IN ({placeholders})
     '''
@@ -2259,14 +2776,20 @@ async def send_news_to_telegram(request: TelegramSendRequest, user: User = Depen
     import html as html_lib
     messages = []
     for news in news_items:
-        news_id, title, url, content = news
+        news_id, title, url, content, type = news
+        type = type or 'news'  # Default to news if null
+
         # HTML转义标题和内容中的特殊字符
         escaped_title = html_lib.escape(title)
-        escaped_content = html_lib.escape(content or '')
         
-        # 构建HTML消息：标题（超链接）+ 空行 + 内容
-        # 格式：<b>标题链接</b>\n\n内容
-        message = f'<b><a href="{url}">{escaped_title}</a></b>\n\n{escaped_content}'
+        if type == 'article':
+            # 文章：📰 Emoji，只显示蓝字链接，无内容
+            message = f'📰 <b><a href="{url}">{escaped_title}</a></b>'
+        else:
+            # 快讯：⚡ Emoji，显示标题+内容
+            escaped_content = html_lib.escape(content or '')
+            message = f'⚡ <b><a href="{url}">{escaped_title}</a></b>\n\n{escaped_content}'
+            
         messages.append(message)
     
     # 用两个换行分隔每条新闻
@@ -2277,12 +2800,28 @@ async def send_news_to_telegram(request: TelegramSendRequest, user: User = Depen
     if len(full_message) > 4096:
         messages = []
         for news in news_items:
-            news_id, title, url, content = news
+            news_id, title, url, content, type = news
+            type = type or 'news'
+
             escaped_title = html_lib.escape(title)
+            
+            if type == 'article':
+                 message = f'📰 <b><a href="{url}">{escaped_title}</a></b>\n\n'
+                 # 文章没有内容需要截断，直接添加（注意预留分隔符）
+                 # 但下面的逻辑是基于 message 构建的，所以先根据类型区分
+                 
+                 # 对于文章，没有 content 部分，所以 message 就是 base_message (rstrip)
+                 messages.append(message.rstrip('\n\n'))
+                 # 检查总长度
+                 if len('\n\n'.join(messages)) > 4000:
+                     break
+                 continue
+
+            # 快讯逻辑
             escaped_content = html_lib.escape(content or '')
             
             # 构建基础消息（标题部分）
-            base_message = f'<b><a href="{url}">{escaped_title}</a></b>\n\n'
+            base_message = f'⚡ <b><a href="{url}">{escaped_title}</a></b>\n\n'
             
             # 如果当前已有消息，预留分隔符长度
             current_length = len('\n\n'.join(messages))

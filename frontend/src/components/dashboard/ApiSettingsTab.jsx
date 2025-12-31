@@ -35,13 +35,20 @@ const ApiSettingsTab = () => {
     // System Config State
     const [timezone, setTimezone] = useState('Asia/Shanghai');
     const [pushTime, setPushTime] = useState('20:00');
+    const [articlePushTime, setArticlePushTime] = useState('21:00');
     const [loadingTz, setLoadingTz] = useState(false);
 
-    // Auto-Pipeline Config State
+    // Auto-Pipeline Config State (News)
     const [dedupHours, setDedupHours] = useState(2);
     const [filterHours, setFilterHours] = useState(24);
     const [aiScoringHours, setAiScoringHours] = useState(10);
     const [pushHours, setPushHours] = useState(2);
+
+    // Auto-Pipeline Config State (Articles)
+    const [articleDedupHours, setArticleDedupHours] = useState(2);
+    const [articleFilterHours, setArticleFilterHours] = useState(24);
+    const [articleAiScoringHours, setArticleAiScoringHours] = useState(10);
+    const [articlePushHours, setArticlePushHours] = useState(2);
 
     // Credential Update State
     const [credentialForm] = Form.useForm();
@@ -70,8 +77,13 @@ const ApiSettingsTab = () => {
     const fetchPushTime = async () => {
         try {
             const res = await getDailyPushTime();
-            if (res.data && res.data.time) {
-                setPushTime(res.data.time);
+            if (res.data) {
+                if (res.data.time) {
+                    setPushTime(res.data.time);
+                }
+                if (res.data.article_time) {
+                    setArticlePushTime(res.data.article_time);
+                }
             }
         } catch (error) {
             console.error("Failed to fetch push time", error);
@@ -82,10 +94,17 @@ const ApiSettingsTab = () => {
         try {
             const res = await getAutoPipelineConfig();
             if (res.data) {
+                // News config
                 setDedupHours(res.data.dedup_hours || 2);
                 setFilterHours(res.data.filter_hours || 24);
                 setAiScoringHours(res.data.ai_scoring_hours || 10);
                 setPushHours(res.data.push_hours || 2);
+
+                // Article config
+                setArticleDedupHours(res.data.article_dedup_hours || 2);
+                setArticleFilterHours(res.data.article_filter_hours || 24);
+                setArticleAiScoringHours(res.data.article_ai_scoring_hours || 10);
+                setArticlePushHours(res.data.article_push_hours || 2);
             }
         } catch (error) {
             console.error("Failed to fetch auto-pipeline config", error);
@@ -96,14 +115,18 @@ const ApiSettingsTab = () => {
         try {
             setLoadingTz(true);
             await setSystemTimezone({ timezone });
-            // Save push time
-            await setDailyPushTime(pushTime);
-            // Save auto-pipeline config
+            // Save push time (both news and articles)
+            await setDailyPushTime({ time: pushTime, article_time: articlePushTime });
+            // Save auto-pipeline config (both news and articles)
             await setAutoPipelineConfig({
                 dedup_hours: dedupHours,
                 filter_hours: filterHours,
                 ai_scoring_hours: aiScoringHours,
-                push_hours: pushHours
+                push_hours: pushHours,
+                article_dedup_hours: articleDedupHours,
+                article_filter_hours: articleFilterHours,
+                article_ai_scoring_hours: articleAiScoringHours,
+                article_push_hours: articlePushHours
             });
 
             message.success("系统配置已更新");
@@ -328,29 +351,12 @@ const ApiSettingsTab = () => {
                                 </Select>
                             </Form.Item>
 
-                            <Form.Item label="每日推送时间 (Daily Push Time)" style={{ marginBottom: 16, minWidth: 200 }}>
-                                <TimePicker
-                                    value={dayjs(pushTime, 'HH:mm')}
-                                    format="HH:mm"
-                                    onChange={(time, timeString) => setPushTime(timeString)}
-                                    style={{ width: 120 }}
-                                    allowClear={false}
-                                />
-                            </Form.Item>
-
-                            <Form.Item style={{ marginBottom: 16 }}>
-                                <Button
-                                    type="primary"
-                                    icon={<SaveOutlined />}
-                                    onClick={handleSaveTimezone}
-                                    loading={loadingTz}
-                                >
-                                    保存设置
-                                </Button>
-                            </Form.Item>
-
                             {/* 自动化流程配置 - 单独一行 */}
                             <div style={{ width: '100%', marginBottom: 16 }} />
+
+                            <div style={{ width: '100%', marginBottom: 8 }}>
+                                <Text strong>快讯（News）配置：</Text>
+                            </div>
 
                             <Form.Item label="去重时间范围" style={{ marginBottom: 16 }}>
                                 <TimeRangeSelect value={dedupHours} onChange={setDedupHours} />
@@ -367,6 +373,57 @@ const ApiSettingsTab = () => {
                             <Form.Item label="推送时间范围" style={{ marginBottom: 16 }}>
                                 <TimeRangeSelect value={pushHours} onChange={setPushHours} />
                             </Form.Item>
+
+                            <Form.Item label="每日新闻日报推送时间" style={{ marginBottom: 16 }}>
+                                <TimePicker
+                                    value={dayjs(pushTime, 'HH:mm')}
+                                    format="HH:mm"
+                                    onChange={(time, timeString) => setPushTime(timeString)}
+                                    style={{ width: 120 }}
+                                    allowClear={false}
+                                />
+                            </Form.Item>
+
+                            <div style={{ width: '100%', marginBottom: 8, marginTop: 16 }}>
+                                <Text strong>深度文章（Articles）配置：</Text>
+                            </div>
+
+                            <Form.Item label="去重时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={articleDedupHours} onChange={setArticleDedupHours} />
+                            </Form.Item>
+
+                            <Form.Item label="过滤时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={articleFilterHours} onChange={setArticleFilterHours} />
+                            </Form.Item>
+
+                            <Form.Item label="AI打分时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={articleAiScoringHours} onChange={setArticleAiScoringHours} />
+                            </Form.Item>
+
+                            <Form.Item label="推送时间范围" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={articlePushHours} onChange={setArticlePushHours} />
+                            </Form.Item>
+
+                            <Form.Item label="每日文章日报推送时间" style={{ marginBottom: 16 }}>
+                                <TimePicker
+                                    value={dayjs(articlePushTime, 'HH:mm')}
+                                    format="HH:mm"
+                                    onChange={(time, timeString) => setArticlePushTime(timeString)}
+                                    style={{ width: 120 }}
+                                    allowClear={false}
+                                />
+                            </Form.Item>
+
+                            <div style={{ width: '100%', marginTop: 16 }}>
+                                <Button
+                                    type="primary"
+                                    icon={<SaveOutlined />}
+                                    onClick={handleSaveTimezone}
+                                    loading={loadingTz}
+                                >
+                                    保存设置
+                                </Button>
+                            </div>
 
                             <div style={{ marginTop: 8, color: '#666', fontSize: 13, width: '100%' }}>
                                 * 此设置将影响所有定时任务（如工作时间判断、每日推送、数据去重范围等）。修改后立即生效。

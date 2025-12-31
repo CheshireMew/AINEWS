@@ -9,7 +9,7 @@ import usePaginationConfig from '../common/usePaginationConfig';
  * 重复对照Tab组件
  * 显示所有原始新闻：有重复的（可展开）+ 独立的（无重复）
  */
-const DuplicateTreeTab = ({ spiders, onShowExport }) => {
+const DuplicateTreeTab = ({ spiders, onShowExport, contentType }) => {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
@@ -89,7 +89,7 @@ const DuplicateTreeTab = ({ spiders, onShowExport }) => {
     const fetchNews = async (page = 1, pageSize = pagination.pageSize, source = filterSource, keyword = filterKeyword) => {
         setLoading(true);
         try {
-            const res = await getNews(1, 10000, source, null, keyword);
+            const res = await getNews(1, 10000, source, null, keyword, contentType);
             const similarityGroups = groupBySimilarity(res.data.data);
 
             setGroups(similarityGroups);
@@ -142,7 +142,7 @@ const DuplicateTreeTab = ({ spiders, onShowExport }) => {
 
     useEffect(() => {
         fetchNews(1, pagination.pageSize, filterSource, filterKeyword);
-    }, []);
+    }, [contentType]);
 
     // 计算当前页的分组
     const currentPageGroups = groups.slice(
@@ -174,10 +174,10 @@ const DuplicateTreeTab = ({ spiders, onShowExport }) => {
 
             <div style={{ padding: '16px' }}>
                 {/* 🆕 相似度检测工具 */}
-                <Card title="🔍 相似度检测工具" size="small" style={{ marginBottom: '16px' }}>
+                <Card title={contentType === 'article' ? "🔍 文章相似度检测工具" : "🔍 新闻相似度检测工具"} size="small" style={{ marginBottom: '16px' }}>
                     <Row gutter={[8, 8]} align="middle">
-                        <Col><Input placeholder="新闻ID 1" value={newsId1} onChange={(e) => setNewsId1(e.target.value)} style={{ width: '120px' }} /></Col>
-                        <Col><Input placeholder="新闻ID 2" value={newsId2} onChange={(e) => setNewsId2(e.target.value)} style={{ width: '120px' }} /></Col>
+                        <Col><Input placeholder={contentType === 'article' ? "文章ID 1" : "新闻ID 1"} value={newsId1} onChange={(e) => setNewsId1(e.target.value)} style={{ width: '120px' }} /></Col>
+                        <Col><Input placeholder={contentType === 'article' ? "文章ID 2" : "新闻ID 2"} value={newsId2} onChange={(e) => setNewsId2(e.target.value)} style={{ width: '120px' }} /></Col>
                         <Col><Button type="primary" onClick={handleCheckSimilarity} loading={checkingLoading}>检测相似度</Button></Col>
                         {similarityResult && (
                             <Col flex="auto">
@@ -304,8 +304,7 @@ const DuplicateTreeTab = ({ spiders, onShowExport }) => {
 
                 {/* 分页 */}
                 {groups.length > 0 && (
-                    <div style={{ marginTop: '20px', textAlign: 'right' }}>
-                        <span style={{ marginRight: '16px' }}>共 {groups.length} 条原始新闻</span>
+                    <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
                         <Pagination
                             {...getPaginationConfig(
                                 pagination,
@@ -325,7 +324,8 @@ DuplicateTreeTab.propTypes = {
         name: PropTypes.string,
         url: PropTypes.string
     })),
-    onShowExport: PropTypes.func
+    onShowExport: PropTypes.func,
+    contentType: PropTypes.string
 };
 
 export default DuplicateTreeTab;

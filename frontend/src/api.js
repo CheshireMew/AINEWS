@@ -91,33 +91,33 @@ export const login = async (username, password) => {
     return res.data;
 };
 
-export const getStats = () => api.get('/stats');
-export const getNews = (page = 1, limit = 50, source = null, stage = null, keyword = null) =>
-    api.get('/news', { params: { page, limit, source, stage, keyword } });
+export const getStats = (type = 'news') => api.get('/stats', { params: { type } });
+export const getNews = (page = 1, limit = 50, source = null, stage = null, keyword = null, type = 'news') =>
+    api.get('/news', { params: { page, limit, source, stage, keyword, type } });
 export const getSpiders = () => api.get('/spiders');
 export const getSpiderStatus = () => api.get('/spiders/status');
 export const deleteNews = (id) => api.delete(`/news/${id}`);
 export const runSpider = (name, items = 10) => api.post(`/spiders/run/${name}`, { items });
 export const cancelScraper = (name) => api.post(`/spiders/stop/${name}`);
 export const updateConfig = (name, { interval, limit }) => api.post(`/spiders/config/${name}`, { interval, limit });
-export const deduplicateNews = (timeWindowHours, action = 'mark', threshold = 0.50) =>
-    api.post('/news/deduplicate', { time_window_hours: timeWindowHours, action, threshold });
-export const getDeduplicatedNews = (page = 1, limit = 50, source = null, keyword = null) =>
-    api.get('/deduplicated/news', { params: { page, limit, source, keyword } });
+export const deduplicateNews = (timeWindowHours, action = 'mark', threshold = 0.50, type = 'news') =>
+    api.post('/news/deduplicate', { time_window_hours: timeWindowHours, action, threshold, type });
+export const getDeduplicatedNews = (page = 1, limit = 50, source = null, keyword = null, type = 'news', stage = null) =>
+    api.get('/deduplicated/news', { params: { page, limit, source, keyword, type, stage } });
 export const getDeduplicatedStats = () =>
     api.get('/deduplicated/stats');
 
 export const deleteDeduplicatedNews = (newsId) =>
     api.delete(`/deduplicated/news/${newsId}`);
 
-export const batchRestoreDeduplicated = () =>
-    api.post('/deduplicated/batch_restore_all');
+export const batchRestoreDeduplicated = (type = 'news') =>
+    api.post('/deduplicated/batch_restore_all', null, { params: { type } });
 
-export const batchRestoreFiltered = () =>
-    api.post('/filtered/batch_restore_all');
+export const batchRestoreFiltered = (type = 'news') =>
+    api.post('/filtered/batch_restore_all', null, { params: { type } });
 
-export const getCuratedNews = (page = 1, limit = 50, source = null, keyword = null) =>
-    api.get('/curated/news', { params: { page, limit, source, keyword } });
+export const getCuratedNews = (page = 1, limit = 50, source = null, keyword = null, type = 'news', ai_status = null) =>
+    api.get('/curated/news', { params: { page, limit, source, keyword, type, ai_status } });
 
 export const getCuratedStats = () => api.get('/curated/stats');
 
@@ -127,14 +127,14 @@ export const deleteCuratedNews = (newsId) =>
 export const restoreNews = (newsId, sourceTable = 'deduplicated_news') =>
     api.post(`/news/restore/${newsId}`, { source_table: sourceTable });
 
-export const getFilteredDedupNews = (page = 1, limit = 50, keyword = null) =>
-    api.get('/filtered/dedup/news', { params: { page, limit, keyword } });
+export const getFilteredDedupNews = (page = 1, limit = 50, keyword = null, type = 'news') =>
+    api.get('/filtered/dedup/news', { params: { page, limit, keyword, type } });
 
 // Blacklist APIs
-export const getBlacklist = () => api.get('/blacklist');
-export const addBlacklist = (keyword, matchType = 'contains') => api.post('/blacklist', { keyword, match_type: matchType });
+export const getBlacklist = (type = 'news') => api.get('/blacklist', { params: { type } });
+export const addBlacklist = (keyword, matchType = 'contains', type = 'news') => api.post('/blacklist', { keyword, match_type: matchType, type });
 export const deleteBlacklist = (id) => api.delete(`/blacklist/${id}`);
-export const filterNews = (timeRangeHours) => api.post('/news/filter', { time_range_hours: timeRangeHours });
+export const filterNews = (timeRangeHours, type = 'news') => api.post('/news/filter', { time_range_hours: timeRangeHours, type });
 
 // Export API
 export const exportNews = (params) => {
@@ -152,26 +152,26 @@ export const exportNews = (params) => {
 export const filterCuratedNews = (params) =>
     api.post('/curated/ai_filter', params);
 
-export const getAiConfig = () => api.get('/ai/config');
-export const setAiConfig = (config) => api.post('/ai/config', config);
+export const getAiConfig = (type = 'news') => api.get('/ai/config', { params: { type } });
+export const setAiConfig = (config, type = 'news') => api.post('/ai/config', config, { params: { type } });
 
 // System API
 export const updateCredentials = (data) => api.post('/system/credentials', data);
 export const getSystemTimezone = () => api.get('/system/timezone');
 export const setSystemTimezone = (config) => api.post('/system/timezone', config);
 export const getDailyPushTime = () => api.get('/system/push_time');
-export const setDailyPushTime = (time) => api.post('/system/push_time', { time });
+export const setDailyPushTime = (data) => api.post('/system/push_time', data);
 
-export const getFilteredCurated = (status, page = 1, limit = 50, source = null, keyword = null) =>
-    api.get('/curated/filtered', { params: { status, page, limit, source, keyword } });
+export const getFilteredCurated = (status, page = 1, limit = 50, source = null, keyword = null, type = 'news') =>
+    api.get('/curated/filtered', { params: { status, page, limit, source, keyword, type } });
 
 export const restoreCuratedNews = (id) => api.post(`/curated/restore/${id}`);
-export const batchRestoreCurated = () => api.post('/curated/batch_restore');
-export const clearAllAiStatus = () => api.post('/curated/clear_all_ai_status');
+export const batchRestoreCurated = (type = 'news') => api.post('/curated/batch_restore', null, { params: { type } });
+export const clearAllAiStatus = (type = 'news') => api.post('/curated/clear_all_ai_status', null, { params: { type } });
 
 // Export News
-export const getExportNews = (hours, minScore) => api.get('/curated/export', {
-    params: { hours, min_score: minScore }
+export const getExportNews = (hours, minScore, type = 'news') => api.get('/curated/export', {
+    params: { hours, min_score: minScore, type }
 });
 
 

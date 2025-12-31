@@ -13,7 +13,7 @@ import usePaginationConfig from '../common/usePaginationConfig';
  * 数据管理Tab组件
  * 用于管理所有原始新闻数据（平铺展示）
  */
-const NewsManagementTab = ({ spiders, onShowExport }) => {
+const NewsManagementTab = ({ spiders, onShowExport, contentType }) => {
     // 状态管理
     const [news, setNews] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
     const fetchNews = async (page = 1, pageSize = pagination.pageSize, source = filterSource, keyword = filterKeyword) => {
         setLoading(true);
         try {
-            const res = await getNews(page, pageSize, source, null, keyword);
+            const res = await getNews(page, pageSize, source, null, keyword, contentType);
             setNews(res.data.data);
             setPagination({
                 current: page,
@@ -60,7 +60,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
     // 组件加载时获取数据
     useEffect(() => {
         fetchNews(1, pagination.pageSize, filterSource, filterKeyword);
-    }, []);
+    }, [contentType]);
 
     // 表格列定义
     const columns = [
@@ -83,6 +83,12 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
             )
         },
         { title: '来源', dataIndex: 'source_site', width: 120 },
+        {
+            title: '作者',
+            dataIndex: 'author',
+            width: 140,
+            render: (text) => text || '-'  // 如果没有作者显示 -
+        },
         {
             title: '状态',
             dataIndex: 'stage',
@@ -133,6 +139,7 @@ const NewsManagementTab = ({ spiders, onShowExport }) => {
                     setFilterSource(val);
                     fetchNews(1, pagination.pageSize, val, filterKeyword);
                 }}
+                contentType={contentType}
                 onExport={() => onShowExport && onShowExport('raw')}
                 onRefresh={() => fetchNews(pagination.current, pagination.pageSize, filterSource, filterKeyword)}
                 loading={loading}
@@ -165,7 +172,8 @@ NewsManagementTab.propTypes = {
         name: PropTypes.string,
         url: PropTypes.string
     })),
-    onShowExport: PropTypes.func
+    onShowExport: PropTypes.func,
+    contentType: PropTypes.string
 };
 
 export default NewsManagementTab;

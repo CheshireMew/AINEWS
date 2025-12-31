@@ -157,7 +157,8 @@ class PANewsScraper(BaseScraper):
                     'url': url,
                     'published_at': published_at,
                     'is_marked_important': True,
-                    'site_importance_flag': 'shoufa'
+                    'site_importance_flag': 'shoufa',
+                    'author': self.site_name
                 }
                 
                 news_list.append(news_item)

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import usePaginationConfig from '../common/usePaginationConfig';
 import PropTypes from 'prop-types';
 import { Table, Button, Select, Space, message, Popconfirm, InputNumber } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -6,6 +7,7 @@ import { getDeduplicatedNews, restoreNews, deduplicateNews, deleteDeduplicatedNe
 import NewsExpandedView from './NewsExpandedView';
 import NewsToolbar from './NewsToolbar';
 import TimeRangeSelect from './TimeRangeSelect';
+import BatchRestoreButton from './BatchRestoreButton';
 
 const { Option } = Select;
 
@@ -13,7 +15,8 @@ const { Option } = Select;
  * 去重数据Tab组件
  * 用于管理已去重的新闻数据
  */
-const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
+const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport, contentType }) => {
+    const { getPaginationConfig } = usePaginationConfig();
     // 状态管理
     const [dedupNews, setDedupNews] = useState([]);
     const [loadingDedup, setLoadingDedup] = useState(false);
@@ -51,10 +54,10 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     const handleDeduplicate = async () => {
         setDeduplicating(true);
         try {
-            const res = await deduplicateNews(dedupTimeRange, 'mark', threshold);
+            const res = await deduplicateNews(dedupTimeRange, 'mark', threshold, contentType);
             message.success(`去重完成！标记了 ${res.data.stats.duplicates_processed} 条重复新闻, 归档了 ${res.data.stats.archived_count} 条`);
             // 去重会移动数据到本表，刷新列表
-            fetchDedupNews(1, dedupFilterSource);
+            fetchDedupNews(1, dedupPagination.pageSize, dedupFilterSource);
         } catch (e) {
             message.error('去重失败: ' + (e.response?.data?.detail || e.message));
         } finally {
@@ -66,14 +69,15 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
     /**
      * 获取去重数据
      */
-    const fetchDedupNews = async (page = 1, source = dedupFilterSource, keyword = filterKeyword) => {
+    const fetchDedupNews = async (page = 1, pageSize = dedupPagination.pageSize, source = dedupFilterSource, keyword = filterKeyword) => {
         setLoadingDedup(true);
         try {
-            const res = await getDeduplicatedNews(page, 10, source, keyword);
+            const res = await getDeduplicatedNews(page, pageSize, source, keyword, contentType);
             setDedupNews(res.data.data);
             setDedupPagination({
                 ...dedupPagination,
                 current: page,
+                pageSize: pageSize,
                 total: res.data.total
             });
         } catch (e) {
@@ -90,7 +94,7 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
         try {
             await deleteDeduplicatedNews(id);
             message.success('删除成功');
-            fetchDedupNews(dedupPagination.current, dedupFilterSource);
+            fetchDedupNews(dedupPagination.current, dedupPagination.pageSize, dedupFilterSource);
         } catch (e) {
             message.error('删除失败');
         }
@@ -103,7 +107,7 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
         try {
             await restoreNews(id, 'deduplicated_news');
             message.success('还原成功');
-            fetchDedupNews(dedupPagination.current, dedupFilterSource);
+            fetchDedupNews(dedupPagination.current, dedupPagination.pageSize, dedupFilterSource);
         } catch (e) {
             message.error('还原失败');
         }
@@ -111,30 +115,10 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
 
     // 组件加载时获取数据
     useEffect(() => {
-        fetchDedupNews(1, dedupFilterSource);
-    }, []);
+        fetchDedupNews(1, dedupPagination.pageSize, dedupFilterSource);
+    }, [contentType]);
 
     // 表格列定义
-    /**
-     * 批量还原所有已处理的去重数据
-     */
-    const handleBatchRestore = async () => {
-        try {
-            const res = await batchRestoreDeduplicated();
-            message.success({
-                content: `批量还原成功！还原了 ${res.data.restored_count} 条数据。请切换到"重复对照"Tab刷新查看。`,
-                duration: 5
-            });
-            fetchDedupNews(1);
-            // 触发页面刷新提示
-            setTimeout(() => {
-                message.info('建议刷新页面（F5）以查看最新数据', 3);
-            }, 2000);
-        } catch (e) {
-            message.error('批量还原失败: ' + (e.response?.data?.detail || e.message));
-        }
-    };
-
     // Table columns
     const columns = [
         { title: 'ID', dataIndex: 'id', width: 60 },
@@ -201,16 +185,16 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
             <NewsToolbar
                 onSearch={(val) => {
                     setFilterKeyword(val);
-                    fetchDedupNews(1, dedupFilterSource, val);
+                    fetchDedupNews(1, dedupPagination.pageSize, dedupFilterSource, val);
                 }}
                 spiders={spiders}
                 selectedSource={dedupFilterSource}
                 onSourceChange={(val) => {
                     setDedupFilterSource(val);
-                    fetchDedupNews(1, val, filterKeyword);
+                    fetchDedupNews(1, dedupPagination.pageSize, val, filterKeyword);
                 }}
                 onExport={() => onShowExport && onShowExport('deduplicated')}
-                onRefresh={() => fetchDedupNews(dedupPagination.current, dedupFilterSource, filterKeyword)}
+                onRefresh={() => fetchDedupNews(dedupPagination.current, dedupPagination.pageSize, dedupFilterSource, filterKeyword)}
                 loading={loadingDedup}
             >
                 <Space>
@@ -235,17 +219,7 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
                     </Button>
                 </Space>
                 <div style={{ borderLeft: '1px solid #d9d9d9', height: 24, margin: '0 8px', display: 'inline-block', verticalAlign: 'middle' }} />
-                <Popconfirm
-                    title="还原已去重数据"
-                    description="确定要还原已处理的去重数据吗？这将把数据还原到 news 表的 'raw' 状态。（注：AI 筛选/精选记录将被保留，不会丢失已打好的标签）"
-                    onConfirm={handleBatchRestore}
-                    okText="确定"
-                    cancelText="取消"
-                >
-                    <Button type="primary" danger>
-                        还原已去重数据
-                    </Button>
-                </Popconfirm>
+                <BatchRestoreButton onSuccess={() => fetchDedupNews(1)} contentType={contentType} />
             </NewsToolbar>
 
             <Table
@@ -253,11 +227,11 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
                 dataSource={dedupNews}
                 rowKey="id"
                 loading={loadingDedup}
-                pagination={{
-                    ...dedupPagination,
-                    showSizeChanger: false,
-                    onChange: (page) => fetchDedupNews(page, dedupFilterSource, filterKeyword)
-                }}
+                pagination={getPaginationConfig(
+                    dedupPagination,
+                    (page, pageSize) => fetchDedupNews(page, pageSize, dedupFilterSource, filterKeyword),
+                    (page, pageSize) => fetchDedupNews(1, pageSize, dedupFilterSource, filterKeyword)
+                )}
                 expandable={{
                     expandedRowRender: record => <NewsExpandedView record={record} />,
                     rowExpandable: record => true,
@@ -270,7 +244,8 @@ const DeduplicatedTab = ({ spiders, onAddToFeatured, onShowExport }) => {
 DeduplicatedTab.propTypes = {
     spiders: PropTypes.arrayOf(PropTypes.object),
     onAddToFeatured: PropTypes.func,
-    onShowExport: PropTypes.func
+    onShowExport: PropTypes.func,
+    contentType: PropTypes.string
 };
 
 export default DeduplicatedTab;

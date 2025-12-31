@@ -8,20 +8,35 @@ import ScraperCard from './ScraperCard';
  * 用于管理所有爬虫的运行状态和配置
  * Updated: Force Refresh
  */
-const SpiderControlTab = ({ spiders, spiderStatus, onRun, onCancel, onConfigChange }) => {
+const SpiderControlTab = ({ spiders, spiderStatus, onRun, onCancel, onConfigChange, contentType }) => {
+    // 根据 contentType 过滤爬虫
+    const filteredSpiders = spiders.filter(spider => {
+        // 如果 spider 是对象（新格式），检查 type
+        if (typeof spider === 'object' && spider.type) {
+            return spider.type === contentType;
+        }
+        // 兼容旧格式（字符串），默认为 news
+        return contentType === 'news';
+    });
+
     return (
-        <Row gutter={[16, 16]}>
-            {spiders.map(name => (
-                <ScraperCard
-                    key={name}
-                    name={name}
-                    status={spiderStatus[name] || {}}
-                    onRun={onRun}
-                    onCancel={onCancel}
-                    onConfigChange={onConfigChange}
-                />
-            ))}
-        </Row>
+        <div style={{ padding: '0 10px' }}>
+            <Row gutter={[16, 16]}>
+                {filteredSpiders.map(spider => {
+                    const spiderName = typeof spider === 'object' ? spider.name : spider;
+                    return (
+                        <ScraperCard
+                            key={spiderName}
+                            name={spiderName}
+                            status={spiderStatus[spiderName] || {}}
+                            onRun={onRun}
+                            onCancel={onCancel}
+                            onConfigChange={onConfigChange}
+                        />
+                    );
+                })}
+            </Row>
+        </div>
     );
 };
 

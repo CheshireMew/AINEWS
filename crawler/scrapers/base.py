@@ -45,7 +45,7 @@ class BaseScraper(ABC):
         if self.playwright:
             await self.playwright.stop()
     
-    async def fetch_page_with_delay(self, url: str, delay_range: tuple = (1, 3), max_retries: int = 3):
+    async def fetch_page_with_delay(self, url: str, delay_range: tuple = (1, 3), max_retries: int = 3, return_response: bool = False, page: Optional[Page] = None):
         """
         带延迟和重试的页面访问（反爬策略）
         
@@ -53,9 +53,11 @@ class BaseScraper(ABC):
             url: 要访问的URL
             delay_range: 延迟时间范围（秒），如(1, 3)表示1-3秒随机延迟
             max_retries: 最大重试次数
+            return_response: 是否返回Response对象而不是Page对象
+            page: 指定使用的Page对象，若为None则使用self.page
             
         Returns:
-            Page对象，访问成功后可继续操作
+            Page对象 或 Response对象
         
         Raises:
             Exception: 重试失败后抛出异常
@@ -64,6 +66,8 @@ class BaseScraper(ABC):
         import sys
         sys.path.insert(0, 'E:/Work/Code/AINEWS/backend')
         from utils.user_agents import get_random_user_agent
+        
+        target_page = page if page else self.page
         
         # 请求前延迟（避免请求过快）
         delay = random.uniform(*delay_range)
@@ -74,13 +78,17 @@ class BaseScraper(ABC):
             try:
                 # 设置随机User-Agent
                 user_agent = get_random_user_agent()
-                await self.page.set_extra_http_headers({
+                await target_page.set_extra_http_headers({
                     'User-Agent': user_agent
                 })
                 
                 # 访问页面
-                await self.page.goto(url, wait_until='domcontentloaded')
-                return self.page
+                response = await target_page.goto(url, wait_until='domcontentloaded')
+                
+                if return_response:
+                    return response
+                    
+                return target_page
                 
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -419,37 +427,70 @@ class BaseScraper(ABC):
     def load_last_news(self, db):
         """
         从数据库加载最新新闻信息（用于增量抓取）
-        
-        Args:
-            db: Database实例
+        + 加载最近批量URL用于多专栏/乱序抓取的去重
         """
+        self.db = db  # 保存 DB 引用供子类使用
+        
         if not self.incremental_mode:
             return
-        
-        latest = db.get_latest_news(self.site_name)
-        if latest:
-            self.last_news_title = latest['title']
-            self.last_news_url = latest['source_url']
             
-            # Load time if available
-            self.last_news_time = None
-            if 'published_at' in latest and latest['published_at']:
-                # Ensure it's datetime object. Sqlite adapter might return str
-                t = latest['published_at']
-                if isinstance(t, str):
-                    try:
-                        self.last_news_time = datetime.fromisoformat(t)
-                    except:
-                        pass # Keep None
-                elif isinstance(t, datetime):
-                    self.last_news_time = t
-                    
-            print(f"[增量抓取] 上次最新: {self.last_news_title[:30]}... ({self.last_news_time})")
-        else:
-            print(f"[增量抓取] 未找到历史记录，将抓取所有新闻")
-            self.last_news_title = None
-            self.last_news_url = None
-            self.last_news_time = None
+        try:
+             # 直接查询数据库获取最近的一批记录（200条），以支持多专栏并行抓取时的去重
+             conn = db.connect()
+             cursor = conn.cursor()
+             
+             cursor.execute('''
+                SELECT source_url, title, published_at FROM news 
+                WHERE source_site = ? 
+                ORDER BY published_at DESC 
+                LIMIT 200
+             ''', (self.site_name,))
+             
+             rows = cursor.fetchall()
+             try:
+                 conn.close()
+             except: pass
+             
+             if rows:
+                 # 1. 设置最新一条的状态（作为主要参考）
+                 latest = rows[0] # tuple: (url, title, published_at)
+                 self.last_news_url = latest[0]
+                 self.last_news_title = latest[1]
+                 
+                 # 处理时间
+                 t = latest[2]
+                 self.last_news_time = None
+                 if t:
+                     if isinstance(t, str):
+                         try:
+                            # 尝试常用格式
+                            self.last_news_time = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                         except:
+                            try:
+                                self.last_news_time = datetime.fromisoformat(t)
+                            except: pass
+                     elif isinstance(t, datetime):
+                         self.last_news_time = t
+                     
+                 # 2. 填充 existing_urls 集合（用于更健壮的去重）
+                 count = 0
+                 for row in rows:
+                     url = row[0]
+                     if url:
+                         self.existing_urls.add(url)
+                         count += 1
+                 
+                 print(f"[增量抓取] {self.site_name}: 已加载 {count} 条历史URL用于去重")
+                 print(f"[增量抓取] 最新记录: {self.last_news_title[:30]}... ({self.last_news_time})")
+             else:
+                 print(f"[增量抓取] {self.site_name}: 未找到历史记录，将全量抓取")
+                 self.last_news_title = None
+                 self.last_news_url = None
+                 self.last_news_time = None
+                 
+        except Exception as e:
+            print(f"[增量抓取] 加载历史记录失败: {e}")
+            # 出错时不停止，降级为全量抓取
     
     
     def should_stop_scraping(self, news_title: str, news_url: str, news_time: datetime = None) -> bool:

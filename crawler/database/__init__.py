@@ -11,6 +11,6 @@ if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
 else:
     # 使用SQLite
     print("🪶 使用SQLite数据库")
-    from database.db_sqlite import Database
+    from .db_sqlite import Database
 
 __all__ = ['Database']

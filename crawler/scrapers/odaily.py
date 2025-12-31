@@ -133,7 +133,8 @@ class OdailyScraper(BaseScraper):
                     'url': url,
                     'published_at': published_at,
                     'is_marked_important': True,
-                    'site_importance_flag': 'hot_icon'
+                    'site_importance_flag': 'hot_icon',
+                    'author': self.site_name
                 }
                 
                 news_list.append(news_item)

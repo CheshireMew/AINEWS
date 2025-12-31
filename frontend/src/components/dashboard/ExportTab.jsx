@@ -11,7 +11,7 @@ const { Option } = Select;
  * 新闻输出Tab组件
  * 用于加载、筛选和导出AI评分的新闻
  */
-const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
+const ExportTab = ({ manuallyFeatured, setManuallyFeatured, contentType }) => {
     // 筛选条件状态
     const [exportTimeRange, setExportTimeRange] = useState(24); // 24小时
     const [exportMinScore, setExportMinScore] = useState(6); // 最低6分
@@ -30,7 +30,7 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
             setNewsExportLoading(true);
             // 清空手动加精列表
             setManuallyFeatured([]);
-            const res = await getExportNews(exportTimeRange, exportMinScore);
+            const res = await getExportNews(exportTimeRange, exportMinScore, contentType);
             setExportNews(res.data.news || []);
             setSelectedNewsIds([]);
             message.success(`加载了 ${res.data.news?.length || 0} 条新闻`);
@@ -90,22 +90,20 @@ const ExportTab = ({ manuallyFeatured, setManuallyFeatured }) => {
         // TG Footer constants - Simple HTML fragment
         const footerHtml = `
 <br><br>
-<a href="https://0xcheshire.gitbook.io/web3/">币圈新人手册</a><br>
-注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join/A999998">欧易</a><br>
+注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join?ref=A999998">欧易</a> <a href="https://0xcheshire.gitbook.io/web3/">新手教程</a><br>
 Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <a href="https://web3.okx.com/ul/joindex?ref=1234567">OKX</a> <a href="https://link.metamask.io/rewards?referral=36P4HH">小狐狸（刷分）</a>`;
 
         const footerText = `
-币圈新人手册 https://0xcheshire.gitbook.io/web3/
-注册交易所 币安 https://binance.com/join?ref=SRXT5KUM 欧易 https://okx.com/join/A999998  
+注册交易所 币安 https://binance.com/join?ref=SRXT5KUM 欧易 https://okx.com/join/A999998 新手教程 https://0xcheshire.gitbook.io/web3/
 Web3钱包 币安 https://web3.binance.com/referral?ref=RP3AEJ2M OKX https://web3.okx.com/ul/joindex?ref=1234567 小狐狸（刷分） https://link.metamask.io/rewards?referral=36P4HH`;
 
         // 构建HTML内容，Telegram支持的格式
-        // 既然用户提供的"老代码"好用，我们回归最简模式：只用<a>和<br>
+        // 格式：<b><a href="url">Title</a></b>
         const htmlLinks = selected
-            .map(n => `<a href="${n.source_url}">${escapeHtml(n.title)}</a>`)
-            .join('<br><br>');
+            .map(n => `⚡ <b><a href="${n.source_url}">${escapeHtml(n.title)}</a></b>`)
+            .join('<br><br>\n'); // 使用 \n 辅助换行识别
 
-        // 拼接 HTML (不带 DOCTYPE/html/body，因为用户反馈这样好用)
+        // 拼接 HTML
         const htmlContent = htmlLinks + footerHtml;
 
         // 纯文本fallback - 包含链接
@@ -326,7 +324,9 @@ Web3钱包 币安 https://web3.binance.com/referral?ref=RP3AEJ2M OKX https://web
 };
 
 ExportTab.propTypes = {
-    manuallyFeatured: PropTypes.arrayOf(PropTypes.object)
+    manuallyFeatured: PropTypes.arrayOf(PropTypes.object),
+    setManuallyFeatured: PropTypes.func,
+    contentType: PropTypes.string
 };
 
 export default ExportTab;

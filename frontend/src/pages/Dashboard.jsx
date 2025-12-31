@@ -11,7 +11,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
     Layout, Menu, Button, Card, Row, Col,
     Statistic, Tag, Tabs, message, Select, Space, Input, Popconfirm,
-    DatePicker, Modal, Checkbox
+    DatePicker, Modal, Checkbox, Segmented
 } from 'antd';
 import {
     LogoutOutlined, ReloadOutlined, RobotOutlined,
@@ -33,33 +33,12 @@ import TimeRangeSelect from '../components/dashboard/TimeRangeSelect';
 const Dashboard = () => {
     const navigate = useNavigate();
     const [stats, setStats] = useState([]);
-    const [news, setNews] = useState([]);
-    const [loading, setLoading] = useState(false);
     const [spiders, setSpiders] = useState([]);
     const [spiderStatus, setSpiderStatus] = useState({});
     const [activeKey, setActiveKey] = useState('1');
-
-    // Pagination
-    const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-    const [filterSource, setFilterSource] = useState(null);
-
-
-
-    // Deduplicated news
-    const [dedupNews, setDedupNews] = useState([]);
-    const [dedupPagination, setDedupPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-    const [dedupFilterSource, setDedupFilterSource] = useState(null);
-    const [loadingDedup, setLoadingDedup] = useState(false);
-
-    // AI Filter and Best Tab (pagination for tab labels)
-    const [rejectedPagination, setRejectedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-    const [approvedPagination, setApprovedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+    const [contentType, setContentType] = useState('news'); // 'news' or 'article'
 
     // AI Filter State
-    const [rejectedNews, setRejectedNews] = useState([]);
-    const [rejectedLoading, setRejectedLoading] = useState(false);
-    const [approvedNews, setApprovedNews] = useState([]);
-    const [approvedLoading, setApprovedLoading] = useState(false);
     const [aiFilterPrompt, setAiFilterPrompt] = useState('');
     const [aiFilterHours, setAiFilterHours] = useState(8);
     const [aiFiltering, setAiFiltering] = useState(false);
@@ -82,46 +61,14 @@ const Dashboard = () => {
 
     const fetchStats = async () => {
         try {
-            const res = await getStats();
+            const res = await getStats(contentType);
             setStats(res.data.stats || []);
         } catch (e) {
             console.error(e);
         }
     };
 
-    const fetchNews = async (page = 1, source = null) => {
-        setLoading(true);
-        try {
-            const res = await getNews(page, pagination.pageSize, source);
-            setNews(res.data.data);
-            setPagination({
-                ...pagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            message.error('加载新闻失败');
-        } finally {
-            setLoading(false);
-        }
-    };
 
-    const fetchDedupNews = async (page = 1, source = null) => {
-        setLoadingDedup(true);
-        try {
-            const res = await getDeduplicatedNews(page, dedupPagination.pageSize, source);
-            setDedupNews(res.data.data);
-            setDedupPagination({
-                ...dedupPagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            message.error('加载去重数据失败');
-        } finally {
-            setLoadingDedup(false);
-        }
-    };
 
     const fetchSpiders = async () => {
         try {
@@ -134,20 +81,38 @@ const Dashboard = () => {
 
     useEffect(() => {
         fetchStats();
-        fetchNews(1, filterSource);
         fetchSpiders();
+    }, []);
 
-        // 初始化时加载所有数据的第一页以获取统计数量
-        fetchDedupNews(1, null);
-        fetchCuratedNews(1, null);
-        fetchFilteredNews(1);
-        fetchRejectedNews(1);
-        fetchApprovedNews(1);
+    // Refresh stats when contentType changes
+    useEffect(() => {
+        fetchStats();
+    }, [contentType]);
 
+
+    useEffect(() => {
         const fetchSpiderStatus = async () => {
             try {
                 const res = await getSpiderStatus();
-                setSpiderStatus(res.data);
+                // Backend returns spider status dict directly, not wrapped in {spiders: ...}
+                const newStatus = res.data || {};
+
+                // Merge new status with existing status to preserve logs
+                setSpiderStatus(prevStatus => {
+                    const merged = { ...prevStatus };
+                    for (const [spider, status] of Object.entries(newStatus)) {
+                        const prevSpider = prevStatus[spider] || {};
+                        merged[spider] = {
+                            ...prevSpider,
+                            ...status,
+                            // Preserve logs: use new logs only if they have content, otherwise keep old logs
+                            logs: (status.logs && status.logs.length > 0)
+                                ? status.logs
+                                : (prevSpider.logs || [])
+                        };
+                    }
+                    return merged;
+                });
             } catch (e) {
                 console.error(e);
             }
@@ -155,11 +120,10 @@ const Dashboard = () => {
         fetchSpiderStatus();
         const interval = setInterval(fetchSpiderStatus, 3000);
         return () => clearInterval(interval);
-    }, []);
+    }, [contentType]);
 
     const handleLogout = () => {
         localStorage.removeItem('token');
-        // 使用强制刷新跳转，避免由浏览器插件导致的路由问题，并彻底清除内存状态
         window.location.href = '/login';
     };
 
@@ -176,14 +140,14 @@ const Dashboard = () => {
     // 获取全局计数
     const fetchGlobalCounts = async () => {
         try {
-            // Parallel requests for counts (limit=1 is enough to get 'total')
             const [newsRes, dedupRes, filteredRes, curatedRes, rejectedRes, approvedRes] = await Promise.all([
-                api.getNews({ page: 1, limit: 1 }),
-                api.getDeduplicatedNews({ page: 1, limit: 1 }),
-                api.getFilteredDedupNews({ page: 1, limit: 1 }),
-                api.getCuratedNews({ page: 1, limit: 1 }),
-                api.getFilteredCurated('rejected', 1, 1),  // Use positional params
-                api.getFilteredCurated('approved', 1, 1)   // Use positional params
+                api.getNews(1, 1, null, null, null, contentType),
+                api.getDeduplicatedNews(1, 1, null, null, contentType),
+                api.getFilteredDedupNews(1, 1, null, contentType),
+                // Curated Data Tab now shows 'verified' deduplicated data
+                api.getDeduplicatedNews(1, 1, null, null, contentType, 'verified'),
+                api.getFilteredCurated('rejected', 1, 1, null, null, contentType),
+                api.getFilteredCurated('approved', 1, 1, null, null, contentType)
             ]);
 
             setGlobalCounts({
@@ -199,12 +163,13 @@ const Dashboard = () => {
         }
     };
 
-    // 初始加载和定期刷新计数
     useEffect(() => {
         fetchGlobalCounts();
         const interval = setInterval(fetchGlobalCounts, 30000); // 30s auto refresh
         return () => clearInterval(interval);
-    }, []);
+    }, [contentType]); // Re-fetch counts when content type changes
+
+
 
     const handleRunSpider = async (name, items) => {
         try {
@@ -241,96 +206,6 @@ const Dashboard = () => {
 
 
     // Blacklist Logic
-
-
-    // Filtered News View
-    const [filteredNews, setFilteredNews] = useState([]);
-    const [filteredPagination, setFilteredPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-    const [loadingFiltered, setLoadingFiltered] = useState(false);
-
-    // Curated News View
-    const [curatedNews, setCuratedNews] = useState([]);
-    const [curatedPagination, setCuratedPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-    const [loadingCurated, setLoadingCurated] = useState(false);
-    const [curatedFilterSource, setCuratedFilterSource] = useState(null);
-
-    const fetchFilteredNews = async (page = 1) => {
-        setLoadingFiltered(true);
-        try {
-            // Fetch filtered news from deduplicated_news table
-            const res = await getFilteredDedupNews(page, filteredPagination.pageSize);
-            setFilteredNews(res.data.data);
-            setFilteredPagination({
-                ...filteredPagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            console.error("Fetch filtered news failed", e);
-        } finally {
-            setLoadingFiltered(false);
-        }
-    };
-
-    const fetchCuratedNews = async (page = 1, source = null) => {
-        setLoadingCurated(true);
-        try {
-            const res = await getCuratedNews(page, curatedPagination.pageSize, source);
-            setCuratedNews(res.data.data);
-            setCuratedPagination({
-                ...curatedPagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            console.error("Fetch curated news failed", e);
-        } finally {
-            setLoadingCurated(false);
-        }
-    };
-
-
-
-
-
-    // Import API
-    // (Note: imports are at top level, assuming they are added)
-
-
-    const fetchRejectedNews = async (page = 1) => {
-        setRejectedLoading(true);
-        try {
-            const res = await getFilteredCurated('rejected', page, rejectedPagination.pageSize);
-            setRejectedNews(res.data.data);
-            setRejectedPagination({
-                ...rejectedPagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            message.error('加载被拒绝数据失败');
-        } finally {
-            setRejectedLoading(false);
-        }
-    };
-    const fetchApprovedNews = async (page = 1) => {
-        setApprovedLoading(true);
-        try {
-            const res = await getFilteredCurated('approved', page, approvedPagination.pageSize);
-            setApprovedNews(res.data.data);
-            setApprovedPagination({
-                ...approvedPagination,
-                current: page,
-                total: res.data.total
-            });
-        } catch (e) {
-            message.error('加载精选数据失败');
-        } finally {
-            setApprovedLoading(false);
-        }
-    };
-
-
 
 
     // Export Logic
@@ -394,9 +269,19 @@ const Dashboard = () => {
         <Layout className="layout" style={{ minHeight: '100vh' }}>
             <Header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ color: 'white', fontSize: '20px', fontWeight: 'bold' }}>AINews Admin</div>
-                <Button type="primary" danger icon={<LogoutOutlined />} onClick={handleLogout}>
-                    退出
-                </Button>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <Segmented
+                        options={[
+                            { label: '⚡️ 快讯 (News)', value: 'news' },
+                            { label: '📄 深度文章 (Articles)', value: 'article' }
+                        ]}
+                        value={contentType}
+                        onChange={setContentType}
+                    />
+                    <Button type="primary" danger icon={<LogoutOutlined />} onClick={handleLogout}>
+                        退出
+                    </Button>
+                </div>
             </Header>
             <Content style={{ padding: '20px 50px' }}>
 
@@ -420,62 +305,51 @@ const Dashboard = () => {
 
                 <div style={{ background: '#fff', padding: 24, minHeight: 280 }}>
                     <Tabs
+                        destroyOnHidden={false}
                         activeKey={activeKey}
                         onChange={(key) => {
                             setActiveKey(key);
-                            // 切换Tab时立即刷新全局计数
+                            // 切换Tab时仅刷新全局计数（Badge）和统计
                             fetchGlobalCounts();
-
                             if (key === '1') {
-                                fetchNews(1, filterSource);
                                 fetchStats();
-                            } else if (key === '3') { // Deduplicated Data
-                                fetchDedupNews(1, dedupFilterSource);
-                            } else if (key === '5') { // Curated Data
-                                fetchCuratedNews(1, curatedFilterSource);
-                            } else if (key === '7') { // News Export
-                                // 新闻输出tab，无需自动加载数据（用户手动点击加载按钮）
-                            } else if (key === '8') { // AI Filter Tab
-                                fetchRejectedNews(1);
-                            } else if (key === '9') { // AI Best Tab
-                                fetchApprovedNews(1);
                             }
                         }}
                         items={[
                             {
                                 key: '1',
                                 label: <span><DatabaseOutlined />数据管理 ({globalCounts.news})</span>,
-                                children: <NewsManagementTab spiders={spiders} onShowExport={handleShowExport} />
+                                children: <NewsManagementTab spiders={spiders} onShowExport={handleShowExport} contentType={contentType} />
                             },
                             {
                                 key: '1.5',
                                 label: <span><AppstoreOutlined />重复对照</span>,
-                                children: <DuplicateTreeTab spiders={spiders} onShowExport={handleShowExport} />
+                                children: <DuplicateTreeTab spiders={spiders} onShowExport={handleShowExport} contentType={contentType} />
                             },
                             {
                                 key: '3',
                                 label: <span><DatabaseOutlined />去重数据 ({globalCounts.dedup})</span>,
-                                children: <DeduplicatedTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
+                                children: <DeduplicatedTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} contentType={contentType} />
                             },
                             {
                                 key: '4',
                                 label: <span><DatabaseOutlined />过滤设置 ({globalCounts.filtered})</span>,
-                                children: <FilterSettingsTab onAddToFeatured={handleAddToFeatured} active={activeKey === '4'} />
+                                children: <FilterSettingsTab onAddToFeatured={handleAddToFeatured} active={activeKey === '4'} contentType={contentType} />
                             },
                             {
                                 key: '5',
                                 label: <span><DatabaseOutlined />精选数据 ({globalCounts.curated})</span>,
-                                children: <CuratedNewsTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} active={activeKey === '5'} />
+                                children: <CuratedNewsTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} active={activeKey === '5'} contentType={contentType} />
                             },
                             {
                                 key: '8',
                                 label: <span><RobotOutlined />AI 筛选 ({globalCounts.rejected})</span>,
-                                children: <AIFilterTab onAddToFeatured={handleAddToFeatured} />
+                                children: <AIFilterTab onAddToFeatured={handleAddToFeatured} contentType={contentType} />
                             },
                             {
                                 key: '9',
                                 label: <span><DatabaseOutlined />AI 精选 ({globalCounts.approved})</span>,
-                                children: <AIBestTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} />
+                                children: <AIBestTab spiders={spiders} onAddToFeatured={handleAddToFeatured} onShowExport={handleShowExport} contentType={contentType} />
                             },
                             {
                                 key: '2',
@@ -487,6 +361,7 @@ const Dashboard = () => {
                                         onRun={handleRunSpider}
                                         onCancel={handleStopSpider}
                                         onConfigChange={handleConfigChange}
+                                        contentType={contentType}
                                     />
                                 )
                             },
@@ -502,7 +377,7 @@ const Dashboard = () => {
                             {
                                 key: '7',
                                 label: <span><DownloadOutlined />新闻输出</span>,
-                                children: <ExportTab manuallyFeatured={manuallyFeatured} setManuallyFeatured={setManuallyFeatured} />
+                                children: <ExportTab manuallyFeatured={manuallyFeatured} setManuallyFeatured={setManuallyFeatured} contentType={contentType} />
                             }
                         ]}
                     />

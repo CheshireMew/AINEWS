@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import usePaginationConfig from '../common/usePaginationConfig';
 import PropTypes from 'prop-types';
 import { Card, Button, Input, Select, Table, Tag, Space, message, Popconfirm } from 'antd';
 import {
@@ -16,7 +17,8 @@ const { TextArea } = Input;
  * AI筛选Tab组件
  * 用于执行AI筛选并管理rejected的新闻
  */
-const AIFilterTab = ({ onAddToFeatured }) => {
+const AIFilterTab = ({ onAddToFeatured, contentType }) => {
+    const { getPaginationConfig } = usePaginationConfig();
     // AI筛选配置状态
     const [aiFilterPrompt, setAiFilterPrompt] = useState('');
     const [aiFilterHours, setAiFilterHours] = useState(8);
@@ -36,45 +38,48 @@ const AIFilterTab = ({ onAddToFeatured }) => {
     const [rejectedPagination, setRejectedPagination] = useState({ current: 1, pageSize: 10, total: 0 });
     const [filterKeyword, setFilterKeyword] = useState('');
 
-    // 加载AI配置
+    // 初始加载配置
     useEffect(() => {
         const fetchAiConfig = async () => {
             try {
-                const res = await getAiConfig();
+                const res = await getAiConfig(contentType);
                 if (res.data) {
-                    if (res.data.prompt) setAiFilterPrompt(res.data.prompt);
+                    if (res.data.prompt !== undefined) setAiFilterPrompt(res.data.prompt);
                     if (res.data.hours) setAiFilterHours(res.data.hours);
                 }
             } catch (e) {
-                console.error("Failed to fetch AI config", e);
+                console.error("加载AI配置失败", e);
             }
         };
         fetchAiConfig();
 
         // 初始加载rejected列表
-        fetchRejectedNews(1);
-    }, []);
+        fetchRejectedNews(1, rejectedPagination.pageSize);
+    }, [contentType]);
 
     // 保存AI配置
     const handleSaveAiConfig = async () => {
         try {
-            await setAiConfig({ prompt: aiFilterPrompt, hours: aiFilterHours });
+            await setAiConfig({ prompt: aiFilterPrompt, hours: aiFilterHours }, contentType);
+            message.success('配置已保存');
         } catch (e) {
             console.error("Failed to save AI config", e);
+            message.error('保存配置失败');
         }
     };
 
     /**
      * 加载rejected新闻
      */
-    const fetchRejectedNews = async (page = 1, keyword = filterKeyword) => {
+    const fetchRejectedNews = async (page = 1, pageSize = rejectedPagination.pageSize, keyword = filterKeyword) => {
         setRejectedLoading(true);
         try {
-            const res = await getFilteredCurated('rejected', page, 10, null, keyword);
+            const res = await getFilteredCurated('rejected', page, pageSize, null, keyword, contentType);
             setRejectedNews(res.data.data);
             setRejectedPagination({
                 ...rejectedPagination,
                 current: page,
+                pageSize: pageSize,
                 total: res.data.total
             });
         } catch (e) {
@@ -106,7 +111,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
             while (true) {
                 batchCount++;
                 addLog(`⏳ Batch ${batchCount}: Requesting AI analysis...`);
-                const res = await filterCuratedNews({ filter_prompt: aiFilterPrompt, hours: aiFilterHours });
+                const res = await filterCuratedNews({ filter_prompt: aiFilterPrompt, hours: aiFilterHours, type: contentType });
                 const { processed, filtered, total, results } = res.data;
 
                 // Log detailed results from backend
@@ -142,7 +147,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
             }
 
             message.success(`AI筛选全量完成！共处理: ${totalProcessed}, 拒绝: ${totalFiltered}`);
-            fetchRejectedNews(1); // 刷新rejected列表
+            fetchRejectedNews(1, rejectedPagination.pageSize); // 刷新rejected列表
         } catch (e) {
             message.error('AI筛选失败: ' + (e.response?.data?.detail || e.message));
         } finally {
@@ -157,7 +162,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
         try {
             await restoreCuratedNews(id);
             message.success('已还原');
-            fetchRejectedNews(rejectedPagination.current);
+            fetchRejectedNews(rejectedPagination.current, rejectedPagination.pageSize);
         } catch (e) {
             message.error('还原失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -170,7 +175,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
         try {
             await deleteCuratedNews(id);
             message.success('删除成功（已从所有表中永久删除）');
-            fetchRejectedNews(rejectedPagination.current);
+            fetchRejectedNews(rejectedPagination.current, rejectedPagination.pageSize);
         } catch (e) {
             message.error('删除失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -181,9 +186,9 @@ const AIFilterTab = ({ onAddToFeatured }) => {
      */
     const handleBatchRestore = async () => {
         try {
-            const res = await batchRestoreCurated();
+            const res = await batchRestoreCurated(contentType);
             message.success(`批量恢复成功！恢复了 ${res.data.restored_count} 条新闻`);
-            fetchRejectedNews(1);
+            fetchRejectedNews(1, rejectedPagination.pageSize);
         } catch (e) {
             message.error('恢复失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -194,9 +199,9 @@ const AIFilterTab = ({ onAddToFeatured }) => {
      */
     const handleClearAllAiStatus = async () => {
         try {
-            const res = await clearAllAiStatus();
+            const res = await clearAllAiStatus(contentType);
             message.success(`已清除所有AI状态！共清除 ${res.data.cleared_count} 条`);
-            fetchRejectedNews(1);
+            fetchRejectedNews(1, rejectedPagination.pageSize);
         } catch (e) {
             message.error('清除失败: ' + (e.response?.data?.detail || e.message));
         }
@@ -280,6 +285,7 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                                     value={aiFilterPrompt}
                                     onChange={(e) => setAiFilterPrompt(e.target.value)}
                                     placeholder="输入AI筛选提示词..."
+                                    onBlur={handleSaveAiConfig}  // Auto-save on blur
                                 />
                             </div>
                             <Space>
@@ -287,6 +293,9 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                                 <TimeRangeSelect value={aiFilterHours} onChange={setAiFilterHours} />
                                 <Button type="primary" onClick={handleAIFilter} loading={aiFiltering}>
                                     开始AI筛选
+                                </Button>
+                                <Button onClick={handleSaveAiConfig}>
+                                    保存配置
                                 </Button>
                             </Space>
                         </Space>
@@ -331,9 +340,9 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                 <NewsToolbar
                     onSearch={(val) => {
                         setFilterKeyword(val);
-                        fetchRejectedNews(1, val);
+                        fetchRejectedNews(1, rejectedPagination.pageSize, val);
                     }}
-                    onRefresh={() => fetchRejectedNews(rejectedPagination.current, filterKeyword)}
+                    onRefresh={() => fetchRejectedNews(rejectedPagination.current, rejectedPagination.pageSize, filterKeyword)}
                     loading={rejectedLoading}
                 >
                     <Popconfirm
@@ -361,10 +370,11 @@ const AIFilterTab = ({ onAddToFeatured }) => {
                     columns={columns}
                     rowKey="id"
                     loading={rejectedLoading}
-                    pagination={{
-                        ...rejectedPagination,
-                        onChange: (page) => fetchRejectedNews(page, filterKeyword)
-                    }}
+                    pagination={getPaginationConfig(
+                        rejectedPagination,
+                        (page, pageSize) => fetchRejectedNews(page, pageSize, filterKeyword),
+                        (page, pageSize) => fetchRejectedNews(1, pageSize, filterKeyword)
+                    )}
                     expandable={{
                         expandedRowRender: record => <NewsExpandedView record={record} />,
                         rowExpandable: record => true,
@@ -376,7 +386,8 @@ const AIFilterTab = ({ onAddToFeatured }) => {
 };
 
 AIFilterTab.propTypes = {
-    onAddToFeatured: PropTypes.func
+    onAddToFeatured: PropTypes.func,
+    contentType: PropTypes.string
 };
 
 export default AIFilterTab;
