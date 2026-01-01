@@ -13,7 +13,7 @@ const Login = () => {
         try {
             await login(values.username, values.password);
             message.success('登录成功');
-            navigate('/dashboard');
+            navigate('/admin');  // 跳转到后台管理
         } catch (error) {
             message.error('登录失败: 密码错误或服务器异常');
         } finally {

@@ -350,6 +350,26 @@ class Database(DatabaseBase):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_time ON curated_news(curated_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_ai_status ON curated_news(ai_status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_push_status ON curated_news(push_status)')
+        # Optimization for public API pagination
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_published_at ON curated_news(published_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_pushed_at ON curated_news(pushed_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_curated_query_opt ON curated_news(type, push_status, published_at)')
+
+        # 创建每日日报表（daily_reports）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                news_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(date, type)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(date DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_reports_type ON daily_reports(type)')
 
         # 黑名单表
         cursor.execute('''

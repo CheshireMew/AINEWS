@@ -251,6 +251,304 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
 
+# ==================== 公开 API（无需认证）====================
+
+@app.get("/api/public/news")
+async def get_public_news(limit: int = 20, offset: int = 0):
+    """获取精选快讯列表（最近3天）- 查询已推送数据"""
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 直接查询已推送的快讯（已经过去重检查）
+        # ai_explanation 格式：7分-深度思考#AI与人文
+        cursor.execute("""
+            SELECT id, title, source_url, published_at, source_site, ai_category, ai_explanation
+            FROM curated_news
+            WHERE type = 'news'
+              AND push_status = 'sent'
+              AND published_at >= datetime('now', '-3 days')
+            ORDER BY pushed_at DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        
+        rows = cursor.fetchall()
+        
+        # 获取总数
+        cursor.execute("""
+            SELECT COUNT(*) FROM curated_news
+            WHERE type = 'news'
+              AND push_status = 'sent'
+              AND published_at >= datetime('now', '-3 days')
+        """)
+        total = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        news_list = []
+        for row in rows:
+            # 从 ai_explanation 中提取标签
+            # 格式：7分-深度思考#AI与人文
+            ai_tag = None
+            
+            if row[6]:  # ai_explanation
+                try:
+                    explanation = row[6]
+                    # 如果包含 #，提取 # 后面的标签
+                    if '#' in explanation:
+                        ai_tag = explanation.split('#')[1].strip()
+                    # 如果没有 #，尝试提取"分-"后面的第一个词
+                    elif '分-' in explanation:
+                        after_dash = explanation.split('分-', 1)[1]
+                        ai_tag = after_dash.split()[0] if after_dash.strip() else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract tag from explanation: {row[6]}, error: {e}")
+            
+            # 如果没有提取到，使用 ai_category
+            if not ai_tag and row[5]:  # ai_category
+                ai_tag = row[5]
+            
+            # 如果都没有，使用来源
+            if not ai_tag:
+                ai_tag = row[4]  # source_site
+            
+            news_list.append({
+                'id': row[0],
+                'title': row[1],
+                'source_url': row[2],
+                'published_at': row[3],
+                'source_site': row[4],
+                'ai_tag': ai_tag
+            })
+        
+        return APIResponse.success(data={
+            'items': news_list,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+    except Exception as e:
+        logger.error(f"获取公开快讯失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public/articles")
+async def get_public_articles(limit: int = 20, offset: int = 0):
+    """获取精选文章列表（最近7天）- 查询已推送数据"""
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 直接查询已推送的文章（已经过去重检查）
+        # ai_explanation 格式：7分-深度思考#AI与人文
+        cursor.execute("""
+            SELECT id, title, source_url, published_at, source_site, ai_category, ai_explanation
+            FROM curated_news
+            WHERE type = 'article'
+              AND push_status = 'sent'
+              AND published_at >= datetime('now', '-7 days')
+            ORDER BY pushed_at DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        
+        rows = cursor.fetchall()
+        
+        # 获取总数
+        cursor.execute("""
+            SELECT COUNT(*) FROM curated_news
+            WHERE type = 'article'
+              AND push_status = 'sent'
+              AND published_at >= datetime('now', '-7 days')
+        """)
+        total = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        articles_list = []
+        for row in rows:
+            # 从 ai_explanation 中提取标签
+            # 格式：7分-深度思考#AI与人文
+            ai_tag = None
+            
+            if row[6]:  # ai_explanation
+                try:
+                    explanation = row[6]
+                    # 如果包含 #，提取 # 后面的标签
+                    if '#' in explanation:
+                        ai_tag = explanation.split('#')[1].strip()
+                    # 如果没有 #，尝试提取"分-"后面的第一个词
+                    elif '分-' in explanation:
+                        after_dash = explanation.split('分-', 1)[1]
+                        ai_tag = after_dash.split()[0] if after_dash.strip() else None
+                except Exception as e:
+                    logger.debug(f"Failed to extract tag from explanation: {row[6]}, error: {e}")
+            
+            # 如果没有提取到，使用 ai_category
+            if not ai_tag and row[5]:  # ai_category
+                ai_tag = row[5]
+            
+            # 如果都没有，使用来源
+            if not ai_tag:
+                ai_tag = row[4]  # source_site
+            
+            articles_list.append({
+                'id': row[0],
+                'title': row[1],
+                'source_url': row[2],
+                'published_at': row[3],
+                'source_site': row[4],
+                'ai_tag': ai_tag
+            })
+        
+        return APIResponse.success(data={
+            'items': articles_list,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+    except Exception as e:
+        logger.error(f"获取公开文章失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public/dailies")
+async def get_public_dailies(type: Optional[str] = None, limit: int = 20, offset: int = 0):
+    """获取每日日报列表"""
+    try:
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        # 构建查询
+        # 构建查询
+        rows = []
+        total = 0
+        
+        if type:
+            cursor.execute("""
+                SELECT id, date, type, title, content, news_count, created_at
+                FROM daily_reports
+                WHERE type = ?
+                ORDER BY date DESC
+                LIMIT ? OFFSET ?
+            """, (type, limit, offset))
+            rows = cursor.fetchall()
+            
+            cursor.execute("SELECT COUNT(*) FROM daily_reports WHERE type = ?", (type,))
+            total = cursor.fetchone()[0]
+        else:
+            cursor.execute("""
+                SELECT id, date, type, title, content, news_count, created_at
+                FROM daily_reports
+                ORDER BY date DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+            rows = cursor.fetchall()
+            
+            cursor.execute("SELECT COUNT(*) FROM daily_reports")
+            total = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        dailies_list = [{
+            'id': row[0],
+            'date': row[1],
+            'type': row[2],
+            'title': row[3],
+            'content': row[4],
+            'news_count': row[5],
+            'created_at': row[6]
+        } for row in rows]
+        
+        return APIResponse.success(data={
+            'items': dailies_list,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+    except Exception as e:
+        logger.error(f"获取日报失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/public/search")
+async def search_public_content(q: str, type: str = 'all', limit: int = 20, offset: int = 0):
+    """搜索精选内容（快讯+文章）"""
+    try:
+        if not q or len(q.strip()) < 2:
+            raise HTTPException(status_code=400, detail="搜索关键词至少需要2个字符")
+        
+        conn = db.connect()
+        cursor = conn.cursor()
+        
+        search_term = f"%{q}%"
+        
+        # 构建查询条件
+        if type == 'all':
+            type_condition = "AND (type = 'news' OR type = 'article')"
+            time_condition = """
+                AND (
+                    (type = 'news' AND published_at >= datetime('now', '-3 days'))
+                    OR
+                    (type = 'article' AND published_at >= datetime('now', '-7 days'))
+                )
+            """
+        elif type == 'news':
+            type_condition = "AND type = 'news'"
+            time_condition = "AND published_at >= datetime('now', '-3 days')"
+        elif type == 'article':
+            type_condition = "AND type = 'article'"
+            time_condition = "AND published_at >= datetime('now', '-7 days')"
+        else:
+            raise HTTPException(status_code=400, detail="无效的类型参数")
+        
+        # 执行搜索
+        cursor.execute(f"""
+            SELECT id, title, content, source_url, published_at, source_site, type
+            FROM curated_news
+            WHERE ai_status = 'approved'
+              {type_condition}
+              {time_condition}
+              AND (title LIKE ? OR content LIKE ?)
+            ORDER BY published_at DESC
+            LIMIT ? OFFSET ?
+        """, (search_term, search_term, limit, offset))
+        
+        rows = cursor.fetchall()
+        
+        # 获取总数
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM curated_news
+            WHERE ai_status = 'approved'
+              {type_condition}
+              {time_condition}
+              AND (title LIKE ? OR content LIKE ?)
+        """, (search_term, search_term))
+        total = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        results = [{
+            'id': row[0],
+            'title': row[1],
+            'content': row[2],
+            'source_url': row[3],
+            'published_at': row[4],
+            'source_site': row[5],
+            'type': row[6]
+        } for row in rows]
+        
+        return APIResponse.success(data={
+            'items': results,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'query': q
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"搜索失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ====================
+
 class SystemTimezoneConfig(BaseModel):
     timezone: str
 
@@ -897,10 +1195,18 @@ async def auto_daily_best_push(force=False):
         
         # Prepare all lines first
         formatted_items = []
+        seen_identifiers = set() # Check for dups by URL or Title
+
         for news in news_list:
             score = news.get('score', 0)
             title = news.get('title', "No Title")
             url = news.get('source_url', "")
+            
+            # Use URL as primary unique key, fallback to Title
+            identifier = url if url else title
+            if identifier in seen_identifiers:
+                continue
+            seen_identifiers.add(identifier)
             
             # Escape HTML characters for title
             safe_title = html.escape(title)
@@ -979,6 +1285,26 @@ async def auto_daily_best_push(force=False):
         if not force:
             today_str = now.strftime('%Y-%m-%d')
             db.set_config('last_daily_push_date', today_str)
+            
+            # 保存日报到 daily_reports 表
+            try:
+                # 构建完整的日报内容（HTML格式）
+                report_content = base_header + "\\n\\n".join(formatted_items)
+                report_content += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+                
+                conn = db.connect()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO daily_reports 
+                    (date, type, title, content, news_count)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (today_str, 'news', f'{today_str} 精选日报', 
+                      report_content, len(news_list)))
+                conn.commit()
+                conn.close()
+                logger.info(f"✅ [Daily Push] Saved report to database for {today_str}")
+            except Exception as e:
+                logger.error(f"❌ [Daily Push] Failed to save report: {e}")
 
         return {
             "status": "success",
@@ -1165,6 +1491,26 @@ async def auto_daily_article_push(force=False):
         if not force:
             today_str = now.strftime('%Y-%m-%d')
             db.set_config('last_daily_article_push_date', today_str)
+            
+            # 保存文章日报到 daily_reports 表
+            try:
+                # 构建完整的日报内容（HTML格式）
+                report_content = base_header + "\\n\\n".join(formatted_items)
+                report_content += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+                
+                conn = db.connect()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO daily_reports 
+                    (date, type, title, content, news_count)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (today_str, 'article', f'{today_str} 深度文章日报', 
+                      report_content, len(news_list)))
+                conn.commit()
+                conn.close()
+                logger.info(f"✅ [Daily Article Push] Saved report to database for {today_str}")
+            except Exception as e:
+                logger.error(f"❌ [Daily Article Push] Failed to save report: {e}")
 
         return {
             "status": "success",
@@ -1271,7 +1617,7 @@ async def wait_for_scrapers():
 
 
 async def auto_deduplication():
-    """自动去重：处理最近2小时的原始数据"""
+    """自动去重：处理最近12小时的原始数据"""
     logger.info("🔄 [Auto-Dedup] Starting auto deduplication...")
     
     db = Database()
@@ -1279,7 +1625,7 @@ async def auto_deduplication():
     cursor = conn.cursor()
     
     # 从配置读取时间范围，默认2小时
-    dedup_hours = int(db.get_config("auto_dedup_hours") or 2)
+    dedup_hours = int(db.get_config("auto_dedup_hours") or 12)
     logger.info(f"🔄 [Auto-Dedup] Using time range: {dedup_hours} hours")
     
     # 获取最近N小时stage='raw'的新闻

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FrontEndDaily Layout Clone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* 自定义滚动条样式，为了更像截图中的效果 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="bg-blue-600 text-white p-1 rounded-md">
+                    <i class="ph-bold ph-lightning text-xl"></i>
+                </div>
+                <span class="text-xl font-bold text-blue-600 tracking-tight">FrontEndDaily</span>
+            </div>
+
+            <div class="flex-1"></div>
+
+            <div class="flex items-center gap-4">
+                <div class="relative hidden md:block">
+                    <i class="ph ph-magnifying-glass absolute left-3 top-2.5 text-gray-400"></i>
+                    <input type="text" placeholder="搜索..."
+                        class="bg-gray-100 text-sm pl-9 pr-4 py-2 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-100 w-64 text-gray-600">
+                </div>
+
+                <button class="text-gray-500 hover:text-gray-700">
+                    <i class="ph ph-moon text-xl"></i>
+                </button>
+
+                <div
+                    class="w-8 h-8 bg-indigo-600 rounded-md flex items-center justify-center text-white font-bold text-sm cursor-pointer">
+                    U
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 w-full grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+
+        <div class="md:col-span-9 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-h-[80vh]">
+
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div class="flex gap-1">
+                    <button class="px-3 py-1 bg-slate-800 text-white text-sm rounded-md font-medium">全部</button>
+                    <button class="px-3 py-1 text-gray-500 hover:bg-gray-50 text-sm rounded-md font-medium">框架</button>
+                    <button class="px-3 py-1 text-gray-500 hover:bg-gray-50 text-sm rounded-md font-medium">CSS</button>
+                    <button class="px-3 py-1 text-gray-500 hover:bg-gray-50 text-sm rounded-md font-medium">浏览器</button>
+                    <button class="px-3 py-1 text-gray-500 hover:bg-gray-50 text-sm rounded-md font-medium">工程化</button>
+                </div>
+                <div class="text-sm text-gray-400 flex items-center gap-1 cursor-pointer">
+                    Sort by: <span class="text-gray-600 font-medium">Hot</span> <i class="ph ph-caret-down"></i>
+                </div>
+            </div>
+
+            <div class="divide-y divide-gray-50">
+
+                <div class="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group">
+                    <div class="text-gray-300 font-medium text-lg min-w-[20px]">1</div>
+                    <div class="flex-1">
+                        <h3 class="text-base font-medium text-slate-800 mb-1 group-hover:text-blue-600 cursor-pointer">
+                            深入理解 React Server Components：从原理到实践 <span class="text-red-500 text-xs align-top">🔥</span>
+                        </h3>
+                        <div class="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">react.dev</span>
+                            <span>2h ago by Dan A.</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end justify-center gap-1 min-w-[60px]">
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-chat"></i> 45
+                        </div>
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-arrow-fat-up"></i> 124
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group">
+                    <div class="text-gray-300 font-medium text-lg min-w-[20px]">2</div>
+                    <div class="flex-1">
+                        <h3 class="text-base font-medium text-slate-800 mb-1 group-hover:text-blue-600 cursor-pointer">
+                            2025 年你应该掌握的 5 个 CSS 新特性
+                        </h3>
+                        <div class="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">web.dev</span>
+                            <span>4h ago by Una K.</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end justify-center gap-1 min-w-[60px]">
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-chat"></i> 21
+                        </div>
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-arrow-fat-up"></i> 89
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group">
+                    <div class="text-gray-300 font-medium text-lg min-w-[20px]">3</div>
+                    <div class="flex-1">
+                        <h3 class="text-base font-medium text-slate-800 mb-1 group-hover:text-blue-600 cursor-pointer">
+                            Web 性能优化实战：INP 指标优化指南 <span class="text-red-500 text-xs align-top">🔥</span>
+                        </h3>
+                        <div class="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Smashing Mag</span>
+                            <span>6h ago by Addy O.</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end justify-center gap-1 min-w-[60px]">
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-chat"></i> 56
+                        </div>
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-arrow-fat-up"></i> 210
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group">
+                    <div class="text-gray-300 font-medium text-lg min-w-[20px]">4</div>
+                    <div class="flex-1">
+                        <h3 class="text-base font-medium text-slate-800 mb-1 group-hover:text-blue-600 cursor-pointer">
+                            TypeScript 5.5 重大更新：推断类型谓词 (Inferred Type Predicates)
+                        </h3>
+                        <div class="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">TS Blog</span>
+                            <span>12h ago by Matt P.</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end justify-center gap-1 min-w-[60px]">
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-chat"></i> 33
+                        </div>
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-arrow-fat-up"></i> 156
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group">
+                    <div class="text-gray-300 font-medium text-lg min-w-[20px]">5</div>
+                    <div class="flex-1">
+                        <h3 class="text-base font-medium text-slate-800 mb-1 group-hover:text-blue-600 cursor-pointer">
+                            微前端架构的爱与恨：三年落地实践总结 <span class="text-red-500 text-xs align-top">🔥</span>
+                        </h3>
+                        <div class="flex items-center gap-3 text-xs text-gray-400 mt-2">
+                            <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">InfoQ</span>
+                            <span>1d ago by Tech Lead</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end justify-center gap-1 min-w-[60px]">
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-chat"></i> 89
+                        </div>
+                        <div class="flex items-center gap-1 text-gray-400 text-xs">
+                            <i class="ph ph-arrow-fat-up"></i> 342
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="p-6 text-center border-t border-gray-50">
+                <button class="text-gray-400 hover:text-blue-600 text-sm font-medium transition-colors">加载更多...</button>
+            </div>
+        </div>
+
+        <aside class="md:col-span-3 bg-white rounded-xl shadow-sm border border-gray-100 h-auto sticky top-20">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                <div class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                    <h2 class="font-bold text-gray-800 text-sm">7x24h 快讯</h2>
+                </div>
+                <i class="ph ph-funnel text-gray-400 hover:text-gray-600 cursor-pointer"></i>
+            </div>
+
+            <div class="p-4 h-[600px] overflow-y-auto relative">
+                <div class="absolute left-6 top-4 bottom-4 w-px bg-gray-200"></div>
+
+                <div class="relative pl-6 mb-6">
+                    <div class="absolute left-[7px] top-1.5 w-1.5 h-1.5 bg-gray-300 rounded-full border border-white">
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-gray-400">10:42</span>
+                        <span class="text-[10px] font-bold text-blue-500 bg-blue-50 px-1 rounded">REACT</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-snug">
+                        React 19 Beta 发布，新增 useOptimistic Hook
+                    </p>
+                </div>
+
+                <div class="relative pl-6 mb-6">
+                    <div class="absolute left-[7px] top-1.5 w-1.5 h-1.5 bg-gray-300 rounded-full border border-white">
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-gray-400">10:15</span>
+                        <span class="text-[10px] font-bold text-orange-500 bg-orange-50 px-1 rounded">BROWSER</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-snug">
+                        Chrome 125 默认禁用第三方 Cookie
+                    </p>
+                </div>
+
+                <div class="relative pl-6 mb-6">
+                    <div class="absolute left-[7px] top-1.5 w-1.5 h-1.5 bg-gray-300 rounded-full border border-white">
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-gray-400">09:50</span>
+                        <span class="text-[10px] font-bold text-green-500 bg-green-50 px-1 rounded">VUE</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-snug">
+                        Vue Vapor Mode 性能基准测试显示渲染速度提升显著
+                    </p>
+                </div>
+
+                <div class="relative pl-6 mb-6">
+                    <div class="absolute left-[7px] top-1.5 w-1.5 h-1.5 bg-gray-300 rounded-full border border-white">
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-gray-400">09:20</span>
+                        <span class="text-[10px] font-bold text-purple-500 bg-purple-50 px-1 rounded">CSS</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-snug">
+                        CSS Anchor Positioning API 进入 W3C 推荐标准
+                    </p>
+                </div>
+
+                <div class="relative pl-6 mb-6">
+                    <div class="absolute left-[7px] top-1.5 w-1.5 h-1.5 bg-gray-300 rounded-full border border-white">
+                    </div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs text-gray-400">08:45</span>
+                        <span class="text-[10px] font-bold text-cyan-500 bg-cyan-50 px-1 rounded">TOOLING</span>
+                    </div>
+                    <p class="text-sm text-gray-700 leading-snug">
+                        Vite 6.0 路线图公布，重点优化冷启动
+                    </p>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <div class="fixed bottom-8 right-8 flex flex-col items-end gap-3">
+        <button
+            class="w-12 h-12 bg-white text-gray-600 rounded-full shadow-lg border border-gray-100 flex items-center justify-center hover:bg-gray-50">
+            <i class="ph ph-arrow-up"></i>
+        </button>
+        <button
+            class="w-12 h-12 bg-white text-gray-600 rounded-full shadow-lg border border-gray-100 flex items-center justify-center hover:bg-gray-50">
+            <i class="ph ph-dots-three-vertical text-xl"></i>
+        </button>
+    </div>
+
+</body>
+
+</html>
