@@ -9,7 +9,7 @@ BlockBeats 文章爬虫（使用 Playwright）
 - 多段摘要：200-300字
 """
 
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict
 from datetime import datetime
 import re
@@ -32,9 +32,7 @@ class BlockBeatsArticleScraper(ArticleScraper):
         try:
             # 使用 Playwright 访问列表页
             print(f"\n正在访问: {self.article_list_url}")
-            # 使用 fetch_page_with_delay 启用反爬机制 (随机UA, 延迟)
-            # 设置大视口以确保加载多篇文章
-            await self.page.set_viewport_size({"width": 1920, "height": 1080})
+            # 使用 fetch_page_with_delay 启用反爬机制 (随机UA, 延迟, 完整请求头)
             await self.fetch_page_with_delay(self.article_list_url)
             await asyncio.sleep(2)
             
@@ -294,7 +292,8 @@ if __name__ == '__main__':
     
     async def test():
         scraper = BlockBeatsArticleScraper()
-        articles = await scraper.scrape_important_news()
+        # 使用 run() 方法自动管理浏览器生命周期
+        articles = await scraper.run()
         
         print(f"\n{'='*70}")
         print(f"总计抓取: {len(articles)} 篇文章")

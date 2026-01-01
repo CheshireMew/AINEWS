@@ -2,7 +2,7 @@
 MarsBit 文章爬虫
 Target: https://www.marsbit.co/
 """
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 from datetime import datetime

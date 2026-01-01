@@ -2,7 +2,7 @@
 Chainfeeds Article Scraper (RSS)
 Target: https://www.chainfeeds.me/rss
 """
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 from datetime import datetime, timedelta, timezone

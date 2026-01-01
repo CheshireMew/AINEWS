@@ -2,7 +2,7 @@
 WuBlock123 Article Scraper
 Target: https://www.wublock123.com/html/shendu/
 """
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 from datetime import datetime

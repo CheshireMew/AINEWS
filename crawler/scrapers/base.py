@@ -27,12 +27,46 @@ class BaseScraper(ABC):
         self.max_items = max_items  # 每次抓取的最大新闻数量
     
     async def init_browser(self, headless: bool = True):
-        """初始化Playwright浏览器"""
+        """初始化Playwright浏览器（增强反检测）"""
+        import random
+        
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=headless)
+        
+        # 启动参数 - 禁用自动化检测特征
+        self.browser = await self.playwright.chromium.launch(
+            headless=headless,
+            args=[
+                '--disable-blink-features=AutomationControlled',  # 关键：禁用自动化标志
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-infobars',
+            ]
+        )
+        
         self.page = await self.browser.new_page()
         
-        # 设置超时
+        # 1. 注入脚本：覆盖 navigator.webdriver
+        await self.page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+        
+        # 2. 设置随机视口大小（模拟真实用户的不同屏幕）
+        viewport_options = [
+            {"width": 1920, "height": 1080},  # Full HD
+            {"width": 1366, "height": 768},   # 常见笔记本
+            {"width": 1536, "height": 864},   # 常见笔记本
+            {"width": 1440, "height": 900},   # MacBook
+            {"width": 2560, "height": 1440},  # 2K
+        ]
+        viewport = random.choice(viewport_options)
+        await self.page.set_viewport_size(viewport)
+        
+        # 3. 设置超时
         self.page.set_default_timeout(30000)
         self.page.set_default_navigation_timeout(30000)
     
@@ -69,8 +103,10 @@ class BaseScraper(ABC):
         
         target_page = page if page else self.page
         
-        # 请求前延迟（避免请求过快）
-        delay = random.uniform(*delay_range)
+        # 请求前延迟（使用正态分布生成更自然的延迟）
+        mean_delay = sum(delay_range) / 2
+        std_delay = (delay_range[1] - delay_range[0]) / 4
+        delay = max(delay_range[0], min(delay_range[1], random.gauss(mean_delay, std_delay)))
         await asyncio.sleep(delay)
         
         # 重试逻辑  
@@ -78,9 +114,34 @@ class BaseScraper(ABC):
             try:
                 # 设置随机User-Agent
                 user_agent = get_random_user_agent()
-                await target_page.set_extra_http_headers({
-                    'User-Agent': user_agent
-                })
+                
+                # 生成完整的请求头（模拟真实浏览器）
+                headers = {
+                    'User-Agent': user_agent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0',
+                }
+                
+                # 如果是 Chrome 浏览器，添加 sec-ch-ua 系列头
+                if 'Chrome' in user_agent and 'Edg' not in user_agent:
+                    # 从 UA 提取版本号
+                    import re
+                    match = re.search(r'Chrome/(\d+)', user_agent)
+                    chrome_version = match.group(1) if match else '131'
+                    
+                    headers['sec-ch-ua'] = f'"Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}", "Not?A_Brand";v="99"'
+                    headers['sec-ch-ua-mobile'] = '?0'
+                    headers['sec-ch-ua-platform'] = '"Windows"' if 'Windows' in user_agent else ('"macOS"' if 'Mac' in user_agent else '"Linux"')
+                
+                await target_page.set_extra_http_headers(headers)
                 
                 # 访问页面
                 response = await target_page.goto(url, wait_until='domcontentloaded')
@@ -92,9 +153,9 @@ class BaseScraper(ABC):
                 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    # 指数退避
-                    wait_time = 2 ** attempt
-                    print(f"[反爬] 请求失败，{wait_time}秒后重试 (attempt {attempt + 1}/{max_retries}): {str(e)[:50]}")
+                    # 指数退避（增加随机性）
+                    wait_time = 2 ** attempt + random.uniform(0, 1)
+                    print(f"[反爬] 请求失败，{wait_time:.1f}秒后重试 (attempt {attempt + 1}/{max_retries}): {str(e)[:50]}")
                     await asyncio.sleep(wait_time)
                 else:
                     print(f"[反爬] 请求最终失败 ({max_retries}次重试后): {url}")

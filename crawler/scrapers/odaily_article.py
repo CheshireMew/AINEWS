@@ -2,7 +2,7 @@
 Odaily 文章爬虫
 Target: https://www.odaily.news/zh-CN/post
 """
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 import re

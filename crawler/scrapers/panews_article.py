@@ -2,7 +2,7 @@
 PANews 文章爬虫
 Target: https://www.panewslab.com/zh/in-depth
 """
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 import re

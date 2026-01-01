@@ -3,7 +3,7 @@ ChainCatcher 文章爬虫（使用 Playwright）
 抓取 ChainCatcher 深度文章
 """
 
-from scrapers.article_base import ArticleScraper
+from .article_base import ArticleScraper
 from typing import List, Dict, Optional
 import asyncio
 import re
