@@ -9,10 +9,14 @@ import {
     getSystemTimezone, setSystemTimezone,
     getDailyPushTime, setDailyPushTime,
     getAutoPipelineConfig, setAutoPipelineConfig,
-    updateCredentials
+    updateCredentials,
+    getTimeWindowsConfig, setTimeWindowsConfig
 } from '../../api';
 import { GlobalOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+dayjs.extend(customParseFormat);
+
 import { TimePicker } from 'antd';
 import TimeRangeSelect from './TimeRangeSelect';
 
@@ -40,12 +44,14 @@ const ApiSettingsTab = () => {
 
     // Auto-Pipeline Config State (News)
     const [dedupHours, setDedupHours] = useState(2);
+    const [dedupWindowHours, setDedupWindowHours] = useState(2); // 快讯去重时间窗口
     const [filterHours, setFilterHours] = useState(24);
     const [aiScoringHours, setAiScoringHours] = useState(10);
     const [pushHours, setPushHours] = useState(2);
 
     // Auto-Pipeline Config State (Articles)
     const [articleDedupHours, setArticleDedupHours] = useState(2);
+    const [articleDedupWindowHours, setArticleDedupWindowHours] = useState(72); // 文章去重时间窗口：3天=72小时
     const [articleFilterHours, setArticleFilterHours] = useState(24);
     const [articleAiScoringHours, setArticleAiScoringHours] = useState(10);
     const [articlePushHours, setArticlePushHours] = useState(2);
@@ -58,12 +64,13 @@ const ApiSettingsTab = () => {
         fetchDeepSeekConfig();
         fetchTelegramConfig();
         fetchAnalystApiKeys();
-        fetchSystemTimezone();
+        fetchTimezone();
         fetchPushTime();
         fetchAutoPipelineConfig();
+        fetchTimeWindowsConfig();
     }, []);
 
-    const fetchSystemTimezone = async () => {
+    const fetchTimezone = async () => {
         try {
             const res = await getSystemTimezone();
             if (res.data && res.data.timezone) {
@@ -71,6 +78,30 @@ const ApiSettingsTab = () => {
             }
         } catch (error) {
             console.error("Failed to fetch timezone", error);
+        }
+    };
+
+    const fetchTimeWindowsConfig = async () => {
+        try {
+            const res = await getTimeWindowsConfig();
+            if (res.data) {
+                // Load article config
+                if (res.data.article) {
+                    setArticleDedupHours(res.data.article.dedup_hours || 168);
+                    setArticleDedupWindowHours(res.data.article.dedup_window_hours || 72);
+                    setArticleFilterHours(res.data.article.filter_hours || 168);
+                    setArticleAiScoringHours(res.data.article.ai_scoring_hours || 168);
+                    setArticlePushHours(res.data.article.push_hours || 72);
+                }
+                // Load news config
+                if (res.data.news) {
+                    setDedupHours(res.data.news.dedup_hours || 2);
+                    setDedupWindowHours(res.data.news.dedup_window_hours || 2);
+                    setFilterHours(res.data.news.filter_hours || 24);
+                }
+            }
+        } catch (error) {
+            console.error("Failed to fetch time windows config", error);
         }
     };
 
@@ -112,21 +143,33 @@ const ApiSettingsTab = () => {
     };
 
     const handleSaveTimezone = async () => {
+        setLoadingTz(true);
         try {
-            setLoadingTz(true);
+            // Save timezone
             await setSystemTimezone({ timezone });
             // Save push time (both news and articles)
             await setDailyPushTime({ time: pushTime, article_time: articlePushTime });
-            // Save auto-pipeline config (both news and articles)
+
+            // Save time windows config (new API)
+            await setTimeWindowsConfig({
+                article: {
+                    dedup_hours: articleDedupHours,
+                    dedup_window_hours: articleDedupWindowHours,
+                    filter_hours: articleFilterHours,
+                    ai_scoring_hours: articleAiScoringHours,
+                    push_hours: articlePushHours
+                },
+                news: {
+                    dedup_hours: dedupHours,
+                    dedup_window_hours: dedupWindowHours,
+                    filter_hours: filterHours
+                }
+            });
+
+            // Save auto-pipeline config (for compatibility, excluding time windows which are saved above)
             await setAutoPipelineConfig({
-                dedup_hours: dedupHours,
-                filter_hours: filterHours,
                 ai_scoring_hours: aiScoringHours,
-                push_hours: pushHours,
-                article_dedup_hours: articleDedupHours,
-                article_filter_hours: articleFilterHours,
-                article_ai_scoring_hours: articleAiScoringHours,
-                article_push_hours: articlePushHours
+                push_hours: pushHours
             });
 
             message.success("系统配置已更新");
@@ -358,6 +401,10 @@ const ApiSettingsTab = () => {
                                 <Text strong>快讯（News）配置：</Text>
                             </div>
 
+                            <Form.Item label="去重时间窗口" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={dedupWindowHours} onChange={setDedupWindowHours} />
+                            </Form.Item>
+
                             <Form.Item label="去重时间范围" style={{ marginBottom: 16 }}>
                                 <TimeRangeSelect value={dedupHours} onChange={setDedupHours} />
                             </Form.Item>
@@ -375,18 +422,21 @@ const ApiSettingsTab = () => {
                             </Form.Item>
 
                             <Form.Item label="每日新闻日报推送时间" style={{ marginBottom: 16 }}>
-                                <TimePicker
-                                    value={dayjs(pushTime, 'HH:mm')}
-                                    format="HH:mm"
-                                    onChange={(time, timeString) => setPushTime(timeString)}
+                                <Input
+                                    type="time"
+                                    value={pushTime}
+                                    onChange={(e) => setPushTime(e.target.value)}
                                     style={{ width: 120 }}
-                                    allowClear={false}
                                 />
                             </Form.Item>
 
                             <div style={{ width: '100%', marginBottom: 8, marginTop: 16 }}>
                                 <Text strong>深度文章（Articles）配置：</Text>
                             </div>
+
+                            <Form.Item label="去重时间窗口" style={{ marginBottom: 16 }}>
+                                <TimeRangeSelect value={articleDedupWindowHours} onChange={setArticleDedupWindowHours} />
+                            </Form.Item>
 
                             <Form.Item label="去重时间范围" style={{ marginBottom: 16 }}>
                                 <TimeRangeSelect value={articleDedupHours} onChange={setArticleDedupHours} />
@@ -405,12 +455,11 @@ const ApiSettingsTab = () => {
                             </Form.Item>
 
                             <Form.Item label="每日文章日报推送时间" style={{ marginBottom: 16 }}>
-                                <TimePicker
-                                    value={dayjs(articlePushTime, 'HH:mm')}
-                                    format="HH:mm"
-                                    onChange={(time, timeString) => setArticlePushTime(timeString)}
+                                <Input
+                                    type="time"
+                                    value={articlePushTime}
+                                    onChange={(e) => setArticlePushTime(e.target.value)}
                                     style={{ width: 120 }}
-                                    allowClear={false}
                                 />
                             </Form.Item>
 

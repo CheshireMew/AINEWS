@@ -317,6 +317,8 @@ class BaseScraper(ABC):
         if match:
             hour, minute = map(int, match.groups())
             dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # 严格检查：如果时间在未来，肯定是昨天（或者前天，但在快讯里假设是昨天）
+            # 例如现在是 15:30，解析到 23:05，说明是昨晚 23:05
             if dt > now:
                 dt -= timedelta(days=1)
             return dt

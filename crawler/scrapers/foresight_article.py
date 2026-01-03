@@ -112,7 +112,6 @@ class ForesightExpressScraper(BaseForesightColumnScraper):
     def __init__(self):
         super().__init__('ForesightNews 速递', 'https://foresightnews.pro/column/detail/2')
 
-
 class ForesightDepthScraper(BaseForesightColumnScraper):
     def __init__(self):
         super().__init__('ForesightNews 深度', 'https://foresightnews.pro/column/detail/894')

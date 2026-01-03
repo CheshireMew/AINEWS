@@ -104,6 +104,26 @@ SCRAPER_TYPES = {
 
 app = FastAPI(title="AINews Admin API")
 
+# CORS 配置
+import os
+from dotenv import load_dotenv
+
+# 加载环境变量
+env_file = '.env.production' if os.getenv('ENV') == 'production' else '.env.development'
+load_dotenv(env_file)
+
+# 获取允许的来源
+allowed_origins_str = os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173')
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 全局异常处理器
 @app.exception_handler(APIException)
 async def api_exception_handler(request: Request, exc: APIException):
@@ -268,7 +288,7 @@ async def get_public_news(limit: int = 20, offset: int = 0):
             WHERE type = 'news'
               AND push_status = 'sent'
               AND published_at >= datetime('now', '-3 days')
-            ORDER BY pushed_at DESC
+            ORDER BY published_at DESC
             LIMIT ? OFFSET ?
         """, (limit, offset))
         
@@ -346,7 +366,7 @@ async def get_public_articles(limit: int = 20, offset: int = 0):
             WHERE type = 'article'
               AND push_status = 'sent'
               AND published_at >= datetime('now', '-7 days')
-            ORDER BY pushed_at DESC
+            ORDER BY published_at DESC
             LIMIT ? OFFSET ?
         """, (limit, offset))
         
@@ -1092,8 +1112,9 @@ async def scheduler_loop():
                     logger.info(f"[Scheduler] Triggering {name} (Interval: {interval}m, Limit: {limit})")
                     asyncio.create_task(run_scraper_task(name, limit))
             
-            # Check for daily push (20:00 Beijing Time)
-            await auto_daily_best_push()
+            # Check for daily pushes (Non-blocking check)
+            asyncio.create_task(auto_daily_best_push())
+            asyncio.create_task(auto_daily_article_push())
 
             await asyncio.sleep(60) # Check every minute
         except Exception as e:
@@ -1118,15 +1139,17 @@ async def auto_daily_best_push(force=False):
             except:
                 target_hour, target_minute = 20, 0
 
-            # 检查时间窗口 (Target ~ Target+5min)
-            # 例如: 20:00 ~ 20:05
-            is_time = (now.hour == target_hour and 
-                       target_minute <= now.minute <= target_minute + 5)
+            # 检查时间：只要当前时间晚于设定时间，且今天未推送过，就触发
+            # Logic: Current Time >= Target Time
+            current_minutes = now.hour * 60 + now.minute
+            target_minutes = target_hour * 60 + target_minute
+            
+            is_time = current_minutes >= target_minutes
             
             if not is_time:
                 return {
                     "status": "skipped",
-                    "message": f"Not push time (Current: {now.strftime('%H:%M')}, Target: {target_time_str})"
+                    "message": f"Not push time yet (Current: {now.strftime('%H:%M')}, Target: {target_time_str})"
                 }
 
             # 2. Check if already pushed today
@@ -1153,6 +1176,7 @@ async def auto_daily_best_push(force=False):
             WHERE published_at >= ? 
             AND ai_status IN ('approved', 'rejected')
             AND ai_explanation IS NOT NULL
+            AND type = 'news'
         """
         rows = db.execute_query(query, (start_time.strftime('%Y-%m-%d %H:%M:%S'),))
         
@@ -1289,8 +1313,8 @@ async def auto_daily_best_push(force=False):
             # 保存日报到 daily_reports 表
             try:
                 # 构建完整的日报内容（HTML格式）
-                report_content = base_header + "\\n\\n".join(formatted_items)
-                report_content += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+                report_content = base_header + "\n\n".join(formatted_items)
+                report_content += '\n\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
                 
                 conn = db.connect()
                 cursor = conn.cursor()
@@ -1351,14 +1375,17 @@ async def auto_daily_article_push(force=False):
             except:
                 target_hour, target_minute = 21, 0
 
-            # 检查时间窗口
-            is_time = (now.hour == target_hour and 
-                       target_minute <= now.minute <= target_minute + 5)
+            # 检查时间：只要当前时间晚于设定时间，且今天未推送过，就触发
+            current_minutes = now.hour * 60 + now.minute
+            target_minutes = target_hour * 60 + target_minute
+            
+            is_time = current_minutes >= target_minutes
             
             if not is_time:
+                # logger.debug(f"Matches? {is_time} (Now: {now_time_str}, Target: {target_time_str})")
                 return {
                     "status": "skipped",
-                    "message": f"Not push time (Current: {now.strftime('%H:%M')}, Target: {target_time_str})"
+                    "message": f"Not push time yet (Current: {now.strftime('%H:%M')}, Target: {target_time_str})"
                 }
 
             # 2. Check if already pushed today
@@ -1474,10 +1501,10 @@ async def auto_daily_article_push(force=False):
             else:
                 header = base_header
                 
-            full_message = header + "\\n\\n".join(part_items)
+            full_message = header + "\n\n".join(part_items)
             
             if i == total_parts:
-                 full_message += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+                 full_message += '\n\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
             
             success = await bot.send_message(full_message, parse_mode='HTML')
             if not success:
@@ -1495,8 +1522,8 @@ async def auto_daily_article_push(force=False):
             # 保存文章日报到 daily_reports 表
             try:
                 # 构建完整的日报内容（HTML格式）
-                report_content = base_header + "\\n\\n".join(formatted_items)
-                report_content += '\\n\\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+                report_content = base_header + "\n\n".join(formatted_items)
+                report_content += '\n\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
                 
                 conn = db.connect()
                 cursor = conn.cursor()
@@ -1565,7 +1592,8 @@ async def auto_pipeline_loop():
             await wait_for_scrapers()
             
             # 步骤1：自动去重（最近2小时）
-            await auto_deduplication()
+            await auto_deduplication(type='news')
+            await auto_deduplication(type='article')
             
             # 步骤2：自动关键词过滤
             await auto_keyword_filter()
@@ -1576,11 +1604,7 @@ async def auto_pipeline_loop():
             # 步骤4：逐条推送到Telegram
             await auto_telegram_push()
 
-            # 步骤5：每日精选日报推送 (News >= 6分, 20:00)
-            await auto_daily_best_push()
-            
-            # 步骤6：每日文章日报推送 (Article, 21:00)
-            await auto_daily_article_push()
+            # 步骤5 & 6 removed: Moved to scheduler_loop for precision
             
             logger.info("=" * 60)
             logger.info("🤖 [Auto-Pipeline] Cycle completed, waiting for next cycle...")
@@ -1593,16 +1617,26 @@ async def auto_pipeline_loop():
         await asyncio.sleep(900)
 
 
-async def wait_for_scrapers():
+async def wait_for_scrapers(timeout=300):
     """
     智能等待爬虫完成
     - 如果有爬虫正在运行，必须等待（防止数据竞争）
     - 如果所有爬虫都空闲，直接继续
+    - 如果等待超过 timeout 秒，强制继续
     """
+    import time
     logger.info("🕐 [Auto-Pipeline] Checking scraper status...")
+    start_time = time.time()
     
     # 只需要等待那些正在运行的
     while True:
+        # 检查是否超时
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            running_scrapers = [name for name, status in SCRAPER_STATUS.items() if status.get("status") == "running"]
+            logger.warning(f"⚠️ [Auto-Pipeline] Timeout after {int(elapsed)}s, proceeding anyway. Still running: {', '.join(running_scrapers) if running_scrapers else 'none'}")
+            return
+        
         running_scrapers = []
         for name, status in SCRAPER_STATUS.items():
             if status.get("status") == "running":
@@ -1611,22 +1645,28 @@ async def wait_for_scrapers():
         if not running_scrapers:
             logger.info("✅ [Auto-Pipeline] No active scrapers, proceeding immediately")
             return
-            
-        logger.info(f"⏳ [Auto-Pipeline] Waiting for {len(running_scrapers)} active scrapers: {', '.join(running_scrapers)}")
+        logger.info(f"⏳ [Auto-Pipeline] Waiting for {len(running_scrapers)} active scrapers: {', '.join(running_scrapers)} (elapsed: {int(elapsed)}s/{timeout}s)")
         await asyncio.sleep(10)
 
 
-async def auto_deduplication():
-    """自动去重：处理最近12小时的原始数据"""
-    logger.info("🔄 [Auto-Dedup] Starting auto deduplication...")
+async def auto_deduplication(type: str = 'news'):
+    """自动去重：处理最近N小时的原始数据，根据类型使用不同时间窗口"""
+    logger.info(f"🔄 [Auto-Dedup] Starting auto deduplication for {type}...")
     
     db = Database()
     conn = db.connect()
     cursor = conn.cursor()
     
-    # 从配置读取时间范围，默认2小时
-    dedup_hours = int(db.get_config("auto_dedup_hours") or 12)
-    logger.info(f"🔄 [Auto-Dedup] Using time range: {dedup_hours} hours")
+    # 根据类型从配置读取去重时间窗口
+    # 文章默认7天（168小时），快讯默认2小时
+    if type == 'article':
+        dedup_hours = int(db.get_config("article_dedup_hours") or 168)
+        dedup_window_hours = int(db.get_config("article_dedup_window_hours") or 72)  # 3天
+    else:
+        dedup_hours = int(db.get_config("news_dedup_hours") or 2)
+        dedup_window_hours = int(db.get_config("news_dedup_window_hours") or 2)  # 2小时
+    
+    logger.info(f"🔄 [Auto-Dedup] Using time range: {dedup_hours}h, window: {dedup_window_hours}h for {type}")
     
     # 获取最近N小时stage='raw'的新闻
     from datetime import datetime, timedelta
@@ -1635,11 +1675,15 @@ async def auto_deduplication():
     cursor.execute("""
         SELECT id, title, content, source_url, source_site, published_at, scraped_at, type
         FROM news 
-        WHERE (stage = 'raw' OR stage = 'deduplicated') AND published_at >= ?
-        ORDER BY published_at DESC
-    """, (cutoff_time,))
+        WHERE stage = 'raw' AND scraped_at >= ? AND type = ?
+        ORDER BY scraped_at DESC
+    """, (cutoff_time, type))
     
     rows = cursor.fetchall()
+    if not rows:
+        conn.close()
+        logger.info(f"🔄 [Auto-Dedup] No raw {type} data to process")
+        return
     
     logger.info(f"🔄 [Auto-Dedup] Found {len(rows)} raw news items")
     
@@ -1666,13 +1710,9 @@ async def auto_deduplication():
     from filters.local_deduplicator import LocalDeduplicator
     # 从系统配置读取阈值，默认0.50
     threshold = float(db.get_config("dedup_threshold") or 0.50)
-    # 使用LocalDeduplicator标记重复
-    from filters.local_deduplicator import LocalDeduplicator
-    # 从系统配置读取阈值，默认0.50
-    threshold = float(db.get_config("dedup_threshold") or 0.50)
     
-    # 统一使用2小时窗口（与手动去重一致）
-    deduplicator = LocalDeduplicator(similarity_threshold=threshold, time_window_hours=2)
+    # 使用对应类型的时间窗口
+    deduplicator = LocalDeduplicator(similarity_threshold=threshold, time_window_hours=dedup_window_hours)
     marked_news = deduplicator.mark_duplicates(news_list)
     
     # 将非重复的新闻移到deduplicated_news表
@@ -2023,7 +2063,14 @@ async def auto_telegram_push():
     
     # 从系统配置读取阈值，默认0.50
     threshold = float(db.get_config("dedup_threshold") or 0.50)
-    deduplicator = LocalDeduplicator(similarity_threshold=threshold)
+    
+    # 创建两个deduplicator，分别用于文章和快讯
+    # 使用独立的去重时间窗口配置
+    article_dedup_window = int(db.get_config("article_dedup_window_hours") or 72)  # 3天
+    news_dedup_window = int(db.get_config("news_dedup_window_hours") or 2)  # 2小时
+    
+    deduplicator_article = LocalDeduplicator(similarity_threshold=threshold, time_window_hours=article_dedup_window)
+    deduplicator_news = LocalDeduplicator(similarity_threshold=threshold, time_window_hours=news_dedup_window)
     
     TELEGRAM_FOOTER = """
 注册交易所 <a href="https://binance.com/join?ref=SRXT5KUM">币安</a> <a href="https://okx.com/join/A999998">欧易</a> <a href="https://0xcheshire.gitbook.io/web3/">新手教程</a>
@@ -2052,9 +2099,10 @@ Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <
             ORDER BY pushed_at DESC LIMIT ?
         """, (limit_article,))
         recent_pushed_articles = cursor.fetchall()
-        
     except Exception as e:
-        logger.error(f"⚠️ [Auto-Push] Failed to fetch recent pushed history: {e}")
+        logger.error(f"Error fetching recent push: {e}")
+        recent_pushed_news = []
+        recent_pushed_articles = []
     
     # 合并查重列表，但在循环中我们可以根据类型选择对比哪个列表
     # 为简单起见，且LocalDeduplicator是通用的，我们可以构建两个Deduplicator或者在循环中决定
@@ -2072,11 +2120,13 @@ Web3钱包 <a href="https://web3.binance.com/referral?ref=RP3AEJ2M">币安</a> <
         news_id, title, url, content, ai_summary, type = news
         type = type or 'news'
         
-        # 确定使用哪个查重列表
+        # 根据类型选择对应的deduplicator和查重列表
         if type == 'article':
+            deduplicator = deduplicator_article
             check_against = recent_pushed_articles
             check_limit_log = limit_article
         else:
+            deduplicator = deduplicator_news
             check_against = recent_pushed_news
             check_limit_log = limit_news
             
@@ -3461,6 +3511,45 @@ async def test_deepseek_connection_api(user: User = Depends(get_current_user)):
     except Exception as e:
         raise DatabaseError(str(e))
 
+# ============ 时间窗口配置 API ============
+
+@app.get("/api/config/time_windows")
+def get_time_windows_config(user: User = Depends(get_current_user)):
+    """获取文章和快讯的时间窗口配置"""
+    return APIResponse.success(data={
+        "article": {
+            "dedup_hours": int(db.get_config("article_dedup_hours") or 168),  # 7天
+            "dedup_window_hours": int(db.get_config("article_dedup_window_hours") or 72),  # 3天
+            "filter_hours": int(db.get_config("article_filter_hours") or 168),  # 7天
+            "ai_scoring_hours": int(db.get_config("article_ai_scoring_hours") or 168),  # 7天
+            "push_hours": int(db.get_config("article_push_hours") or 72)  # 3天
+        },
+        "news": {
+            "dedup_hours": int(db.get_config("news_dedup_hours") or 2),  # 2小时
+            "dedup_window_hours": int(db.get_config("news_dedup_window_hours") or 2),  # 2小时
+            "filter_hours": int(db.get_config("news_filter_hours") or 24)  # 24小时
+        }
+    })
+
+class TimeWindowsConfig(BaseModel):
+    article: Optional[dict] = None
+    news: Optional[dict] = None
+
+@app.post("/api/config/time_windows")
+def set_time_windows_config(config: TimeWindowsConfig, user: User = Depends(get_current_user)):
+    """保存文章和快讯的时间窗口配置"""
+    # 保存文章配置
+    if config.article:
+        for key, value in config.article.items():
+            db.set_config(f"article_{key}", value)
+    
+    # 保存快讯配置
+    if config.news:
+        for key, value in config.news.items():
+            db.set_config(f"news_{key}", value)
+    
+    return APIResponse.success(message="时间窗口配置已保存")
+
 @app.get("/api/export")
 def export_news(
     start_date: Optional[str] = None,
@@ -3497,6 +3586,7 @@ def export_news(
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
 
 if __name__ == "__main__":
     import uvicorn

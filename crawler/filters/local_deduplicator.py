@@ -262,9 +262,20 @@ class LocalDeduplicator:
             t = news.get('published_at')
             if isinstance(t, str):
                 try:
-                    t = datetime.fromisoformat(t.replace('Z', '+00:00'))
+                    # 尝试处理 ISO 格式和常见的 ' ' 分隔格式
+                    t_str = t.replace('Z', '+00:00')
+                    
+                    # 补充: 处理 "2025-01-01 10:00:00" 这种中间是空格的情况
+                    if 'T' not in t_str and ' ' in t_str:
+                        t_str = t_str.replace(' ', 'T')
+                        
+                    t = datetime.fromisoformat(t_str)
                 except:
-                    t = None
+                    # 获取失败尝试其他格式 (Fallback)
+                    try:
+                        t = datetime.strptime(t, '%Y-%m-%d %H:%M:%S')
+                    except:
+                        t = None
             elif not isinstance(t, datetime):
                 t = None
             parsed_times.append(t)

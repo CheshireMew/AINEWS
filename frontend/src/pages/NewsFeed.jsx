@@ -1,5 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CaretDown, Lightning, MagnifyingGlass, Moon, Sun, ArrowUp, Fire } from '@phosphor-icons/react';
+import { FaHome, FaTelegramPlane, FaTwitter, FaBlog, FaGithub, FaBook } from 'react-icons/fa';
+import { SiBinance } from 'react-icons/si';
+import { API_BASE_URL } from '../config';
+
+// OKX Logo 组件
+const OKXLogo = ({ className }) => (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" width="1em" height="1em">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="13" y="3" width="7" height="7" rx="1.5" />
+        <rect x="8" y="8" width="7" height="7" rx="1.5" />
+        <rect x="3" y="13" width="7" height="7" rx="1.5" />
+        <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </svg>
+);
 
 export default function NewsFeed() {
     // 状态管理
@@ -20,6 +34,25 @@ export default function NewsFeed() {
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
     const [selectedReport, setSelectedReport] = useState(null);
+    const [menuOpen, setMenuOpen] = useState(false);
+
+    // 使用 ref 保存最新的状态，避免定时器闭包问题
+    const activeTabRef = useRef(activeTab);
+    const articlesRef = useRef(articles);
+    const newsListRef = useRef(newsList);
+
+    // 更新 ref
+    useEffect(() => {
+        activeTabRef.current = activeTab;
+    }, [activeTab]);
+
+    useEffect(() => {
+        articlesRef.current = articles;
+    }, [articles]);
+
+    useEffect(() => {
+        newsListRef.current = newsList;
+    }, [newsList]);
 
     // 暗黑模式状态
     const [darkMode, setDarkMode] = useState(() => {
@@ -40,6 +73,18 @@ export default function NewsFeed() {
             localStorage.setItem('theme', 'light');
         }
     }, [darkMode]);
+
+    // 点击外部关闭菜单
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (menuOpen && !event.target.closest('.menu-dropdown')) {
+                setMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, [menuOpen]);
 
     // Search Debounce
     useEffect(() => {
@@ -92,6 +137,106 @@ export default function NewsFeed() {
         fetchNews(1, false);
     }, []);
 
+    // 自动检查并刷新新内容（每5分钟）
+    useEffect(() => {
+        const checkAndRefresh = async () => {
+            try {
+                // 使用 ref 获取最新值
+                const currentTab = activeTabRef.current;
+                const currentArticles = articlesRef.current;
+                const currentNewsList = newsListRef.current;
+
+                console.log(`⏰ 执行定时检查 - 当前Tab: ${currentTab}, 文章数: ${currentArticles.length}, 快讯数: ${currentNewsList.length}`);
+
+                // 同时检查文章和快讯，不管当前在哪个Tab
+
+                // 检查文章是否有新内容
+                if (currentArticles.length > 0) {
+                    console.log('📰 检查文章更新...');
+                    // 获取最新的20条文章
+                    const response = await fetch(`${API_BASE_URL}/api/public/articles?limit=20&offset=0`);
+                    const data = await response.json();
+                    console.log('📥 获取到的数据:', data.success ? `${data.data?.items?.length || 0}条` : '失败');
+
+                    if (data.success && data.data && data.data.items && data.data.items.length > 0) {
+                        // 找出所有新文章（ID不在当前列表中的）
+                        const currentIds = new Set(currentArticles.map(a => a.id));
+                        const newArticles = data.data.items.filter(item => !currentIds.has(item.id));
+
+                        console.log(`🔍 检测结果: 当前列表有${currentArticles.length}篇, 获取到${data.data.items.length}篇, 其中${newArticles.length}篇是新的`);
+                        console.log('📋 当前第一篇ID:', currentArticles[0]?.id, '最新第一篇ID:', data.data.items[0]?.id);
+
+                        if (newArticles.length > 0) {
+                            // 将新文章添加到列表顶部
+                            setArticles(prev => [...newArticles, ...prev]);
+                            console.log(`🔄 自动刷新：添加了 ${newArticles.length} 篇新文章`);
+                        } else {
+                            console.log('✅ 没有新文章');
+                        }
+                    }
+                }
+
+                // 检查快讯是否有新内容
+                if (currentNewsList.length > 0) {
+                    console.log('⚡ 检查快讯更新...');
+                    // 获取最新的20条快讯
+                    const response = await fetch(`${API_BASE_URL}/api/public/news?limit=20&offset=0`);
+                    const data = await response.json();
+                    console.log('📥 获取到的数据:', data.success ? `${data.data?.items?.length || 0}条` : '失败');
+
+                    if (data.success && data.data && data.data.items && data.data.items.length > 0) {
+                        // 找出所有新快讯
+                        const currentIds = new Set(currentNewsList.map(n => n.id));
+                        const newNews = data.data.items.filter(item => !currentIds.has(item.id));
+
+                        console.log(`🔍 检测结果: 当前列表有${currentNewsList.length}条, 获取到${data.data.items.length}条, 其中${newNews.length}条是新的`);
+                        console.log('📋 当前第一条ID:', currentNewsList[0]?.id, '最新第一条ID:', data.data.items[0]?.id);
+
+                        if (newNews.length > 0) {
+                            // 将新快讯添加到列表顶部
+                            setNewsList(prev => [...newNews, ...prev]);
+                            console.log(`🔄 自动刷新：添加了 ${newNews.length} 条新快讯`);
+                        } else {
+                            console.log('✅ 没有新快讯');
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('检查新内容失败:', error);
+            }
+        };
+
+        // 立即运行一次检查（仅用于测试）
+        console.log('✅ 自动刷新定时器已启动，每1分钟检查一次');
+
+        // 每1分钟检查一次（60000ms），方便测试
+        const interval = setInterval(checkAndRefresh, 60000);
+
+        return () => {
+            console.log('⏹️ 自动刷新定时器已清除');
+            clearInterval(interval);
+        };
+    }, []); // 空依赖数组，避免重复创建定时器
+
+    // 刷新页面以显示新内容
+    const refreshContent = () => {
+        setHasNewContent(false);
+        setNewContentCount(0);
+
+        if (activeTab === 'article') {
+            setArticlePage(1);
+            setHasMoreArticles(true);
+            fetchArticles(1, false);
+        } else {
+            setNewsPage(1);
+            setHasMoreNews(true);
+            fetchNews(1, false);
+        }
+
+        // 滚动到顶部
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     // 加载更多
     const loadMore = async () => {
         // 如果在前5页（预加载阶段），不要手动触发加载，防止重复
@@ -130,7 +275,7 @@ export default function NewsFeed() {
         try {
             const limit = 20; // 调整为每页20条，5页共100条
             const offset = (page - 1) * limit;
-            const response = await fetch(`http://localhost:8000/api/public/articles?limit=${limit}&offset=${offset}`);
+            const response = await fetch(`${API_BASE_URL}/api/public/articles?limit=${limit}&offset=${offset}`);
             const data = await response.json();
 
             if (data.success && data.data) {
@@ -172,7 +317,7 @@ export default function NewsFeed() {
         try {
             const limit = 20; // 保持每页20条
             const offset = (page - 1) * limit;
-            const response = await fetch(`http://localhost:8000/api/public/news?limit=${limit}&offset=${offset}`);
+            const response = await fetch(`${API_BASE_URL}/api/public/news?limit=${limit}&offset=${offset}`);
             const data = await response.json();
 
             if (data.success && data.data) {
@@ -206,7 +351,7 @@ export default function NewsFeed() {
     const fetchDailyArticles = async () => {
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:8000/api/public/dailies?type=article&limit=10');
+            const response = await fetch(`${API_BASE_URL}/api/public/dailies?type=article&limit=10`);
             const data = await response.json();
             if (data.success && data.data) {
                 setDailyArticles(data.data.items || []);
@@ -221,7 +366,7 @@ export default function NewsFeed() {
     const fetchDailyNews = async () => {
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:8000/api/public/dailies?type=news&limit=10');
+            const response = await fetch(`${API_BASE_URL}/api/public/dailies?type=news&limit=10`);
             const data = await response.json();
             if (data.success && data.data) {
                 setDailyNews(data.data.items || []);
@@ -252,6 +397,14 @@ export default function NewsFeed() {
         !debouncedSearchQuery || item.title.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
     );
 
+    // Debug: 检查filteredNews是否更新
+    console.log('📊 filteredNews更新:', {
+        newsList长度: newsList.length,
+        filteredNews长度: filteredNews.length,
+        搜索关键词: debouncedSearchQuery,
+        第一条ID: filteredNews[0]?.id
+    });
+
     return (
         <div className="bg-gray-100 min-h-screen dark:bg-gray-950 transition-colors duration-300">
             {/* Header */}
@@ -266,7 +419,8 @@ export default function NewsFeed() {
                         </span>
                     </div>
 
-                    <div className="flex-1 max-w-xl mx-8 relative">
+                    {/* Search Bar - Hidden on Mobile */}
+                    <div className="hidden md:flex flex-1 max-w-xl mx-8 relative">
                         <input
                             type="text"
                             placeholder="在这里搜索已加载内容..."
@@ -277,7 +431,111 @@ export default function NewsFeed() {
                         <MagnifyingGlass className="absolute left-3.5 top-2.5 text-gray-400" size={18} />
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 md:gap-4">
+                        {/* External Links Menu - Click to Toggle */}
+                        <div className="relative menu-dropdown">
+                            <button
+                                onClick={() => setMenuOpen(!menuOpen)}
+                                className="px-2 md:px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:text-blue-400 flex items-center gap-1"
+                            >
+                                <span className="hidden md:inline">链接</span>
+                                <CaretDown size={14} className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            <div className={`absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-100 transition-all duration-200 dark:bg-gray-800 dark:border-gray-700 ${menuOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
+                                }`}>
+                                <div className="py-2">
+                                    <a
+                                        href="https://blacknico.com"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaHome className="text-blue-500" />
+                                            主页
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://t.me/CheshireBTC"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaTelegramPlane className="text-blue-400" />
+                                            Telegram 群
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://x.com/0xCheshire"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaTwitter className="text-sky-500" />
+                                            X (Twitter)
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://blog.blacknico.com/"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaBlog className="text-purple-500" />
+                                            博客
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://github.com/CheshireMew"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaGithub className="text-gray-800 dark:text-gray-200" />
+                                            Github
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://binance.com/join?ref=SRXT5KUM"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <SiBinance className="text-yellow-500" />
+                                            注册币安
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://okx.com/join/A999998"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <OKXLogo className="text-gray-800 dark:text-gray-200" />
+                                            注册 OKX
+                                        </span>
+                                    </a>
+                                    <a
+                                        href="https://0xcheshire.gitbook.io/web3/"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-400"
+                                    >
+                                        <span className="flex items-center gap-2">
+                                            <FaBook className="text-green-600" />
+                                            币圈教程
+                                        </span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
                         <button
                             onClick={() => setDarkMode(!darkMode)}
                             className="p-2 text-gray-400 hover:text-gray-600 transition-colors dark:text-gray-400 dark:hover:text-gray-200"
@@ -294,23 +552,27 @@ export default function NewsFeed() {
                 {/* Left: Articles */}
                 <div className="w-full md:w-2/3 bg-white rounded-xl shadow-sm border border-gray-100 min-h-[80vh] flex flex-col dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
                     {/* Tabs */}
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-16 z-30 bg-white rounded-t-xl dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
-                        <div className="flex gap-1">
-                            {['article', 'daily-article', 'daily-news'].map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab)}
-                                    className={`px-3 py-1 text-sm rounded-md font-medium transition-colors ${activeTab === tab
-                                        ? 'bg-slate-800 text-white dark:bg-blue-600'
-                                        : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
-                                        }`}
-                                >
-                                    {tab === 'article' ? '文章' : tab === 'daily-article' ? '每日文章' : '每日快讯'}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="text-sm text-gray-400 flex items-center gap-1 cursor-pointer">
-                            Sort by: <span className="text-gray-600 font-medium dark:text-gray-300">Latest</span> <CaretDown size={12} />
+                    <div className="flex items-center px-6 py-4 border-b border-gray-100 sticky top-16 z-30 bg-white rounded-t-xl dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
+                        <div className="flex gap-1 overflow-x-auto">
+                            {['article', 'news', 'daily-article', 'daily-news'].map(tab => {
+                                // On mobile, show all tabs. On desktop, hide 'news' tab
+                                const isNewsTab = tab === 'news';
+                                const hideOnDesktop = isNewsTab ? 'md:hidden' : '';
+
+                                return (
+                                    <button
+                                        key={tab}
+                                        onClick={() => setActiveTab(tab)}
+                                        className={`px-3 py-1 text-sm rounded-md font-medium transition-colors whitespace-nowrap ${hideOnDesktop
+                                            } ${activeTab === tab
+                                                ? 'bg-slate-800 text-white dark:bg-blue-600'
+                                                : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+                                            }`}
+                                    >
+                                        {tab === 'article' ? '文章' : tab === 'news' ? '快讯' : tab === 'daily-article' ? '每日文章' : '每日快讯'}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
 
@@ -339,7 +601,7 @@ export default function NewsFeed() {
                                     onClick={() => setSelectedReport(daily)}
                                 />
                             ))
-                        ) : (
+                        ) : activeTab === 'daily-news' ? (
                             dailyNews.map((daily, index) => (
                                 <DailyReportItem
                                     key={daily.id}
@@ -348,16 +610,35 @@ export default function NewsFeed() {
                                     onClick={() => setSelectedReport(daily)}
                                 />
                             ))
-                        )}
+                        ) : activeTab === 'news' ? (
+                            <>
+                                <div className="p-4 relative">
+                                    <div className="absolute left-6 top-4 bottom-4 w-px bg-gray-200 dark:bg-gray-800"></div>
+                                    {filteredNews.map((news, index) => (
+                                        <NewsItem key={news.id} news={news} />
+                                    ))}
+                                </div>
+                                <div className="p-4 text-center text-xs text-gray-400">
+                                    {loadingMore && <span>正在加载更多...</span>}
+                                    {!hasMoreNews && newsList.length > 0 && <span>已加载全部内容</span>}
+                                    {searchQuery && filteredNews.length === 0 && <span>无匹配结果</span>}
+                                </div>
+                            </>
+                        ) : null}
                     </div>
 
-                    {!loading && (activeTab === 'article' ? articles : activeTab === 'daily-article' ? dailyArticles : dailyNews).length === 0 && (
-                        <div className="p-6 text-center text-gray-400">暂无数据</div>
-                    )}
+                    {!loading && (
+                        activeTab === 'article' ? articles :
+                            activeTab === 'daily-article' ? dailyArticles :
+                                activeTab === 'daily-news' ? dailyNews :
+                                    activeTab === 'news' ? newsList : []
+                    ).length === 0 && (
+                            <div className="p-6 text-center text-gray-400">暂无数据</div>
+                        )}
                 </div>
 
-                {/* Right: 7x24h News */}
-                <aside className="w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
+                {/* Right: 7x24h News (Hidden on Mobile) */}
+                <aside className="hidden md:flex w-full md:w-1/3 bg-white rounded-xl shadow-sm border border-gray-100 flex-col dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 sticky top-16 z-30 bg-white rounded-t-xl dark:bg-gray-900 dark:border-gray-800 transition-colors duration-300">
                         <div className="flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
@@ -419,25 +700,25 @@ export default function NewsFeed() {
 }
 
 // 文章列表项
-// 文章列表项
 function ArticleItem({ article, index }) {
     return (
         <div className="flex gap-4 px-6 py-5 hover:bg-gray-50 transition group dark:hover:bg-gray-800/50">
-            <div className="text-gray-300 font-medium text-lg min-w-[20px] dark:text-gray-600">{index}</div>
-            <div className="flex-1">
+            {/* Index - Hidden on Mobile */}
+            <div className="hidden md:block text-gray-300 font-medium text-lg min-w-[20px] dark:text-gray-600">{index}</div>
+            <div className="flex-1 min-w-0">
                 <h3 className="text-[15px] mb-1 leading-snug">
                     <a href={article.source_url} target="_blank" rel="noopener noreferrer" className="font-bold text-black group-hover:text-blue-600 transition-colors dark:text-gray-200 dark:group-hover:text-blue-400">
                         {article.title}
                     </a>
                 </h3>
-                <div className="flex items-center gap-3 text-xs text-gray-400 mt-2 dark:text-gray-500">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-2 dark:text-gray-500">
                     {article.ai_tag && (
-                        <span className="px-1.5 py-0.5 rounded uppercase text-[10px] bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/30 dark:text-blue-300">
+                        <span className="px-1.5 py-0.5 rounded uppercase text-[10px] bg-blue-50 text-blue-700 font-medium whitespace-nowrap dark:bg-blue-900/30 dark:text-blue-300">
                             {article.ai_tag}
                         </span>
                     )}
-                    <span className="text-gray-500 dark:text-gray-500">{article.source_site}</span>
-                    <span>{new Date(article.published_at).toLocaleDateString('zh-CN')}</span>
+                    <span className="text-gray-500 dark:text-gray-500 truncate">{article.source_site}</span>
+                    <span className="whitespace-nowrap">{new Date(article.published_at).toLocaleDateString('zh-CN')}</span>
                 </div>
             </div>
         </div>

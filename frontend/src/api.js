@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { API_BASE_URL } from './config';
 
 const api = axios.create({
-    baseURL: 'http://localhost:8000/api',
+    baseURL: `${API_BASE_URL}/api`,
 });
 
 // Add a request interceptor to attach token if we have one
@@ -201,3 +202,7 @@ export const checkNewsSimilarity = (newsId1, newsId2) =>
     api.post('/news/check_similarity', { news_id_1: newsId1, news_id_2: newsId2 });
 
 export default api;
+
+// 时间窗口配置 API
+export const getTimeWindowsConfig = () => api.get('/config/time_windows');
+export const setTimeWindowsConfig = (config) => api.post('/config/time_windows', config);
