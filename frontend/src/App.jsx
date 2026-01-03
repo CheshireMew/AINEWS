@@ -19,7 +19,7 @@ const App = () => {
     <Router>
       <Routes>
         {/* 公开路由 - 前台展示 */}
-        <Route path="/news" element={<PublicLayout />}>
+        <Route path="/" element={<PublicLayout />}>
           <Route index element={<NewsFeed />} />
         </Route>
 
@@ -36,10 +36,9 @@ const App = () => {
           }
         />
 
-        {/* 默认重定向到前台 */}
-        <Route path="/" element={<Navigate to="/news" replace />} />
+        {/* 默认重定向 */}
         <Route path="/dashboard" element={<Navigate to="/admin" replace />} />
-        <Route path="*" element={<Navigate to="/news" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );
