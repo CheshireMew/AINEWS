@@ -1519,25 +1519,26 @@ async def auto_daily_article_push(force=False):
             today_str = now.strftime('%Y-%m-%d')
             db.set_config('last_daily_article_push_date', today_str)
             
-            # 保存文章日报到 daily_reports 表
-            try:
-                # 构建完整的日报内容（HTML格式）
-                report_content = base_header + "\n\n".join(formatted_items)
-                report_content += '\n\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
-                
-                conn = db.connect()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO daily_reports 
-                    (date, type, title, content, news_count)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (today_str, 'article', f'{today_str} 深度文章日报', 
-                      report_content, len(news_list)))
-                conn.commit()
-                conn.close()
-                logger.info(f"✅ [Daily Article Push] Saved report to database for {today_str}")
-            except Exception as e:
-                logger.error(f"❌ [Daily Article Push] Failed to save report: {e}")
+        # 保存文章日报到 daily_reports 表
+        try:
+            today_str = now.strftime('%Y-%m-%d')
+            # 构建完整的日报内容（HTML格式）
+            report_content = base_header + "\n\n".join(formatted_items)
+            report_content += '\n\n🤖 由 <a href="https://t.me/CheshireBTC">AINEWS</a> 自动生成'
+            
+            conn = db.connect()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO daily_reports 
+                (date, type, title, content, news_count)
+                VALUES (?, ?, ?, ?, ?)
+            """, (today_str, 'article', f'{today_str} 深度文章日报', 
+                    report_content, len(news_list)))
+            conn.commit()
+            conn.close()
+            logger.info(f"✅ [Daily Article Push] Saved report to database for {today_str}")
+        except Exception as e:
+            logger.error(f"❌ [Daily Article Push] Failed to save report: {e}")
 
         return {
             "status": "success",
