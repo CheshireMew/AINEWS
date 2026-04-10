@@ -12,5 +12,4 @@ if ($process) {
 }
 
 Write-Host "Starting Backend Service..." -ForegroundColor Cyan
-# Enable reload for development
-python backend/main.py
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --env-file .env.development

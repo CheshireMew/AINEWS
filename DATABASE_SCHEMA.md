@@ -1,134 +1,169 @@
-# 数据库结构与状态说明书
+# 数据库结构与状态说明
 
-本文档详细描述了 AINEWS 系统中的数据库结构、表的作用以及各个状态标签（stage, status 等）的具体含义。
+本文档只描述当前 SQLite 运行时结构。数据库唯一来源仍然是 [sqlite_schema.py](E:/Work/Code/AINEWS/backend/app/infrastructure/sqlite/sqlite_schema.py)，这里提供的是便于理解的数据视图。
 
-## 1. 数据流转概览 (Workflow)
+## 数据流转概览
 
-系统按照以下流程处理每一条新闻数据，并根据状态将其在不同的表之间移动（或复制）：
+当前运行模型只有三层内容表：
 
-1.  **原始抓取 (Raw Ingestion)**:
-    *   所有爬虫抓取的数据首先进入 `news` 总表。
-    *   状态标记为 `stage='raw'`。
-    
-2.  **去重处理 (Deduplication)**:
-    *   **重复项**: 被标记为 `is_duplicate=1`，`duplicate_of=<主新闻ID>`，状态变为 `stage='duplicate'`。
-    *   **唯一项 (Survivors)**: 被**复制**一份到 `deduplicated_news` 表，`news` 表中状态变为 `stage='deduplicated'`。
-    
-3.  **本地过滤 (Local Filtering)**:
-    *   **被过滤 (Rejected)**: `deduplicated_news` 表中的记录状态被标记为 `stage='filtered'`（保留在表中用于查阅）。
-    *   **通过 (Accepted)**: `deduplicated_news` 表中的记录状态被标记为 `stage='verified'`（等待进入精选/AI 处理）。
-    
-4.  **精选列表 (Curation)**:
-    *   通过人工点击“加精”或系统自动规则，新闻从 `deduplicated_news` **晋升**到 `curated_news` 表。
-    *   `news` 表中状态变为 `stage='curated'`。
-    
-5.  **AI 处理 (AI Processing)**:
-    *   AI 对 `curated_news` 表中的数据进行打分和评价。
-    *   结果更新到 `ai_status` 字段 (`approved` 推荐 / `rejected` 拒绝)。
-    
-6.  **推送 (Push)**:
-    *   被推荐的新闻推送到 Telegram。
-    *   `push_status` 更新为 `'sent'`。
+1. `news`
+   抓取落点和重复关系记录
 
----
+2. `archive_entries`
+   去重后的归档池，也是黑名单处理入口
 
-## 2. 核心数据表 (Key Tables)
+3. `review_entries`
+   AI 审核池，同时承载审核结果和发送状态
 
-### 2.1 `news` (数据总表)
-最底层的原始数据表，**存储所有历史数据**，是数据的“唯一真理来源”。
+日报单独存放在 `daily_reports`，不会再作为内容池参与流转。
 
-| 字段名 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `id` | INTEGER | 主键 ID。 |
-| `title` | TEXT | 新闻标题。 |
-| `content` | TEXT | 新闻内容。 |
-| `source_site` | TEXT | 来源爬虫名 (如 'odaily')。 |
-| `source_url` | TEXT | 原始链接 (用于去重)。 |
-| `stage` | TEXT | **流程状态** (raw, duplicate, deduplicated, curated)。 |
-| `type` | TEXT | 类型 ('news', 'article')。 |
-| `is_duplicate` | BOOLEAN | 是否为重复项 (1=是, 0=否)。 |
-| `duplicate_of` | INTEGER | 重复源的主新闻 ID。 |
+## 核心表
 
-### 2.2 `deduplicated_news` (去重池)
-一个**临时/工作台**性质的表，存放所有通过了去重检查的数据。主要用于展示“已去重数据”和进行“本地过滤”。
-*   **来源**: 当 `news.stage` 变为 `'deduplicated'` 时复制而来。
-*   **清理**: 点击“还原已去重数据”时，此表会被清空（保留 filtered 数据）。
+### `news`
 
-| 字段名 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `id` | INTEGER | 本表主键。 |
-| `original_news_id` | INTEGER | 对应 `news` 表的 ID。 |
-| `stage` | TEXT | 通常为 'deduplicated'。如果被本地关键词过滤，则为 'filtered'。如果通过本地关键词过滤，则为 'verified'。 |
-| `keyword_filter_reason`| TEXT | 被过滤的原因 (关键词)。 |
+用途：保存抓取结果，是内容最早进入系统的地方。
 
-### 2.3 `curated_news` (精选/AI池)
-存放**高价值数据**，用于 AI 分析和最终发布。
-*   **来源**: 从 `deduplicated_news` 晋升而来。
+关键字段：
 
-| 字段名 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `id` | INTEGER | 主键。 |
-| `original_news_id` | INTEGER | 对应 `news` 表的 ID。 |
-| `ai_status` | TEXT | AI 处理结果 (approved, rejected, pending)。 |
-| `ai_summary` | TEXT | AI 生成的摘要。 |
-| `ai_explanation` | TEXT | AI 给出的推荐/拒绝理由。 |
-| `push_status` | TEXT | 推送状态 (sent, pending)。 |
+- `id`: 主键
+- `title`: 标题
+- `content`: 内容
+- `source_site`: 来源站点
+- `source_url`: 原始链接，唯一约束
+- `published_at`: 原发布时间
+- `scraped_at`: 抓取时间
+- `stage`: 当前采集阶段
+- `type`: 内容类型，当前为 `news` 或 `article`
+- `duplicate_of`: 如果是重复项，指向主内容 ID
+- `is_local_duplicate`: 是否由本地去重标记
+- `push_status`、`pushed_at`: 历史兼容字段，当前实时发送以 `review_entries.delivery_status` 为准
 
----
+### `archive_entries`
 
-## 3. 状态标签定义 (Tags Definition)
+用途：保存通过去重后的内容，作为黑名单处理和归档浏览的单一入口。
 
-### 3.1 `news.stage` (主流程阶段)
-定义了一条新闻当前处于生命周期的哪个位置。
+关键字段：
 
-| 值 (Value) | 含义 (Meaning) |
+- `id`: 与原始内容保持同一 ID
+- `title`
+- `content`
+- `source_site`
+- `source_url`
+- `published_at`
+- `scraped_at`
+- `archived_at`: 进入归档池的时间
+- `archive_status`: 归档状态
+- `content_type`: 内容类型
+- `source_item_id`: 对应 `news.id`
+- `restored_from_blocklist`: 是否从拦截状态人工恢复
+- `block_reason`: 拦截原因
+
+### `review_entries`
+
+用途：保存进入审核流程的内容，以及审核和发送结果。
+
+关键字段：
+
+- `id`: 与原始内容保持同一 ID
+- `title`
+- `content`
+- `source_site`
+- `source_url`
+- `published_at`
+- `archived_at`
+- `queued_at`: 进入审核池的时间
+- `review_status`: 审核状态
+- `review_summary`: 审核摘要
+- `review_reason`: 审核理由
+- `review_score`: 审核分数
+- `review_category`: 审核分类
+- `review_tags`: 审核标签
+- `delivery_status`: Telegram 发送状态
+- `delivered_at`: 实际发送时间
+- `content_type`
+- `source_item_id`
+
+### `daily_reports`
+
+用途：存储已生成并已发送的每日日报。
+
+关键字段：
+
+- `date`: 日报日期
+- `type`: 内容类型
+- `title`: 日报标题
+- `content`: 完整正文
+- `news_count`: 条目数
+- `created_at`: 写入时间
+
+## 配置与辅助表
+
+- `system_config`: 系统配置
+- `keyword_blacklist`: 黑名单关键词
+- `push_logs`: 发送日志
+- `api_keys`: 分析师 API Key
+- `tags` / `news_tags`: 标签体系
+- `processing_logs`: 处理日志
+- `filter_stats`: 过滤统计
+
+## 状态定义
+
+### `news.stage`
+
+| 值 | 含义 |
 | :--- | :--- |
-| **`raw`** | **原始状态**。刚抓取进来，还没进行去重检查。 |
-| **`duplicate`** | **重复项**。被判定为重复，将被隐藏或仅在“重复对照”中显示。 |
-| **`deduplicated`** | **已去重**。有效新闻，已进入去重池，等待筛选。 |
-| **`filtered`** | **被过滤**。被本地关键词黑名单拦截 (此状态主要在 deduplicated_news 表中体现)。 |
-| **`curated`** | **已精选**。已进入精选列表，正在进行 AI 分析或等待推送。 |
+| `incoming` | 新抓取内容，尚未进入归档池 |
+| `archived` | 已通过去重并写入归档池 |
+| `duplicate` | 被判定为重复项 |
 
-### 3.2 `curated_news.ai_status` (AI 状态)
-AI 对新闻价值的判断结果。
+### `archive_entries.archive_status`
 
-| 值 (Value) | 含义 (Meaning) |
+| 值 | 含义 |
 | :--- | :--- |
-| **`NULL` (或 pending)** | **待处理**。显示在“精选数据” Tab，等待 AI 分析。 |
-| **`approved`** | **AI 推荐**。高价值新闻，显示在“AI 精选” Tab。 |
-| **`rejected`** | **AI 拒绝**。低价值或无关新闻，显示在“AI 筛选(被拒)” Tab。 |
-| **`restored`** | **人工还原**。人工从被拒列表中捞回的新闻。 |
+| `ready` | 已归档，等待黑名单处理或人工查看 |
+| `blocked` | 命中黑名单，被拦截 |
+| `reviewed` | 已推进到审核池 |
 
-### 3.3 `curated_news.push_status` (推送状态)
-新闻发布到 Telegram 的状态。
+### `review_entries.review_status`
 
-| 值 (Value) | 含义 (Meaning) |
+| 值 | 含义 |
 | :--- | :--- |
-| **`pending`** | **未推送**。 |
-| **`sent`** | **已推送**。已成功发送到 Telegram 频道。 |
-| **`failed`** | **推送失败**。发送过程中出错。 |
+| `pending` | 待审核 |
+| `selected` | 审核通过 |
+| `discarded` | 审核未通过 |
 
----
+### `review_entries.delivery_status`
 
-## 4. 还原逻辑说明 (Batch Restore Logic)
+| 值 | 含义 |
+| :--- | :--- |
+| `pending` | 待发送 |
+| `sent` | 已发送到 Telegram |
 
-点击“还原已去重数据”按钮时，系统执行以下操作来**重置流程**：
+## 处理链路
 
-1.  **重置重复项 (Reset Duplicates)**:
-    *   在 `news` 表中，把所有 `stage='duplicate'` 的记录重置为 `raw`。
-    *   清空 `duplicate_of` 和 `is_duplicate` 标记。
-    *   *结果：清空“重复对照” Tab。*
+1. 爬虫写入 `news`
+2. 去重把非重复内容写入 `archive_entries`
+3. 黑名单把归档内容分成 `blocked` 或推进到 `review_entries`
+4. AI 审核在 `review_entries` 内把内容从 `pending` 更新为 `selected / discarded`
+5. Telegram 实时发送读取 `selected + pending delivery` 的内容
+6. 每日日报从已选入内容汇总后写入 `daily_reports`
 
-2.  **重置已去重项 (Reset Deduplicated)**:
-    *   在 `news` 表中，把所有 `stage='deduplicated'` 的记录重置为 `raw`。
-    *   *结果：清空“去重数据” Tab。*
+## 常见恢复操作
 
-3.  **清理去重池 (Clean Deduplication Pool)**:
-    *   清空 `deduplicated_news` 表。
-    *   **注意**：所有记录将被删除，包括 `filtered` 的数据。
-    *   *结果：清空“去重数据” Tab 以及“过滤设置/已过滤数据” Tab。*
+### 恢复已拦截内容
 
-4.  **保护精选/AI (Protect Curated/AI)**:
-    *   **完全不动** `stage='curated'` 的数据。
-    *   **完全不动** `curated_news` 表。
-    *   *结果：您在“精选数据”、“AI 精选”、“AI 筛选”里的工作成果全部保留，不受影响。*
+将 `archive_entries.archive_status` 从 `blocked` 改回 `ready`，并标记 `restored_from_blocklist = 1`。
+
+### 恢复审核结果
+
+将 `review_entries.review_status` 改回 `pending`，同时清空审核结果字段。
+
+### 删除内容
+
+后台删除会按 `source_url` 级联清理跨池记录，确保同一条内容不会在不同池里留下残片。
+
+## 维护原则
+
+- 运行时状态名称以 [content_contract.py](E:/Work/Code/AINEWS/shared/content_contract.py) 为准
+- 表结构以 [sqlite_schema.py](E:/Work/Code/AINEWS/backend/app/infrastructure/sqlite/sqlite_schema.py) 为准
+- 历史数据迁移以 [sqlite_migrations.py](E:/Work/Code/AINEWS/backend/app/infrastructure/sqlite/sqlite_migrations.py) 为准

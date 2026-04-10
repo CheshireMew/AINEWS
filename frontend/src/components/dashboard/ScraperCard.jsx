@@ -9,7 +9,7 @@ const { Option } = Select;
  * 爬虫控制卡片组件
  * 用于显示单个爬虫的状态和控制面板
  */
-const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
+const ScraperCard = ({ name, displayName, contentKind, status, onRun, onCancel, onConfigChange }) => {
     const isRunning = status.status === 'running';
 
     // Optimistic UI: Initialize with props, but allow immediate local input
@@ -21,15 +21,17 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
     });
 
     useEffect(() => {
-        if (status.limit !== undefined) {
-            setLocalLimit(status.limit);
-        }
-        // Update interval: if undefined/null (manual mode), set to "manual"
-        if (status.interval !== undefined && status.interval !== null) {
-            setLocalInterval(String(status.interval));
-        } else {
-            setLocalInterval("manual");
-        }
+        const timer = setTimeout(() => {
+            if (status.limit !== undefined) {
+                setLocalLimit(status.limit);
+            }
+            if (status.interval !== undefined && status.interval !== null) {
+                setLocalInterval(String(status.interval));
+            } else {
+                setLocalInterval("manual");
+            }
+        }, 0);
+        return () => clearTimeout(timer);
     }, [status.limit, status.interval]);
 
     // Console Auto-scroll Logic
@@ -60,7 +62,7 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
     return (
         <Col span={8}>
             <Card
-                title={name}
+                title={displayName}
                 extra={<Tag color={isRunning ? 'processing' : (status.status === 'error' ? 'error' : 'success')}>{status.status || 'Ready'}</Tag>}
             >
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
@@ -90,7 +92,7 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
                     >
                         <Option value="manual">手动</Option>
                         {/* 文章爬虫使用不同的频率选项（包括foresight专栏和article后缀的爬虫） */}
-                        {(name.includes('article') || name.startsWith('foresight_')) ? (
+                        {contentKind === 'article' ? (
                             <>
                                 <Option value="60">1小时</Option>
                                 <Option value="120">2小时</Option>
@@ -167,16 +169,13 @@ const ScraperCard = ({ name, status, onRun, onCancel, onConfigChange }) => {
 };
 
 ScraperCard.propTypes = {
-    spider: PropTypes.shape({
-        name: PropTypes.string.isRequired,
-        url: PropTypes.string.isRequired,
-        interval: PropTypes.number,
-        limit: PropTypes.number
-    }).isRequired,
+    name: PropTypes.string.isRequired,
+    displayName: PropTypes.string,
+    contentKind: PropTypes.string,
     status: PropTypes.object,
     onRun: PropTypes.func.isRequired,
     onCancel: PropTypes.func.isRequired,
-    onUpdateConfig: PropTypes.func.isRequired
+    onConfigChange: PropTypes.func.isRequired,
 };
 
 export default ScraperCard;

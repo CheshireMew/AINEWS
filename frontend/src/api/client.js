@@ -2,93 +2,64 @@
  * API客户端 - 统一处理API请求和响应
  */
 
-import { message } from 'antd';
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
+import { clearAuthToken, getAuthToken } from '../auth/session';
 
-class APIClient {
-    /**
-     * 通用请求方法
-     * @param {string} url - 请求URL
-     * @param {Object} options - fetch选项
-     * @returns {Promise<Object>} - 响应数据
-     */
-    async request(url, options = {}) {
-        try {
-            const response = await fetch(url, {
-                ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers,
-                },
-            });
+const client = axios.create({
+    baseURL: `${API_BASE_URL}/api`,
+});
 
-            const data = await response.json();
+client.interceptors.request.use((config) => {
+    const token = getAuthToken();
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+});
 
-            // 检查响应是否成功
-            if (!data.success) {
-                // 显示错误消息
-                message.error(data.message || '请求失败');
-                throw new Error(data.message || '请求失败');
+client.interceptors.response.use(
+    (response) => {
+        const data = response.data;
+        if (data && typeof data.success !== 'undefined') {
+            if (data.pagination) {
+                return {
+                    ...response,
+                    data: {
+                        data: data.data,
+                        total: data.pagination.total,
+                        page: data.pagination.page,
+                        limit: data.pagination.limit,
+                        pages: data.pagination.pages,
+                    },
+                };
             }
-
-            return data;
-        } catch (error) {
-            // 网络错误或其他错误
-            if (!error.message.includes('请求失败')) {
-                message.error('网络错误，请稍后重试');
-            }
-            throw error;
+            return {
+                ...response,
+                data: data.data || data,
+            };
         }
-    }
+        return response;
+    },
+    (error) => {
+        if (error.response) {
+            if (error.response.status === 401) {
+                clearAuthToken();
+                if (!window.location.pathname.includes('/login')) {
+                    window.location.href = '/login';
+                }
+            }
 
-    /**
-     * GET请求
-     * @param {string} url - 请求URL
-     * @param {Object} params - URL参数
-     * @returns {Promise<Object>}
-     */
-    async get(url, params = {}) {
-        const queryString = new URLSearchParams(params).toString();
-        const fullUrl = queryString ? `${url}?${queryString}` : url;
-        return this.request(fullUrl);
+            if (error.response.data && error.response.data.success === false) {
+                const customError = new Error(error.response.data.message || '请求失败');
+                customError.response = error.response;
+                customError.errorType = error.response.data.error?.type;
+                customError.errorDetails = error.response.data.error?.details;
+                throw customError;
+            }
+        }
+        throw error;
     }
+);
 
-    /**
-     * POST请求
-     * @param {string} url - 请求URL
-     * @param {Object} body - 请求体
-     * @returns {Promise<Object>}
-     */
-    async post(url, body) {
-        return this.request(url, {
-            method: 'POST',
-            body: JSON.stringify(body),
-        });
-    }
-
-    /**
-     * PUT请求
-     * @param {string} url - 请求URL
-     * @param {Object} body - 请求体
-     * @returns {Promise<Object>}
-     */
-    async put(url, body) {
-        return this.request(url, {
-            method: 'PUT',
-            body: JSON.stringify(body),
-        });
-    }
-
-    /**
-     * DELETE请求
-     * @param {string} url - 请求URL
-     * @returns {Promise<Object>}
-     */
-    async delete(url) {
-        return this.request(url, {
-            method: 'DELETE',
-        });
-    }
-}
-
-// 导出单例
-export default new APIClient();
+export default client;

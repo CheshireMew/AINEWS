@@ -1,0 +1,49 @@
+{
+  "contentKinds": {
+    "news": "news",
+    "article": "article"
+  },
+  "stages": {
+    "incoming": "incoming",
+    "archived": "archived",
+    "duplicate": "duplicate"
+  },
+  "archive": {
+    "table": "archive_entries",
+    "statuses": {
+      "ready": "ready",
+      "blocked": "blocked",
+      "reviewed": "reviewed"
+    }
+  },
+  "review": {
+    "table": "review_entries",
+    "statuses": {
+      "pending": "pending",
+      "selected": "selected",
+      "discarded": "discarded"
+    }
+  },
+  "delivery": {
+    "statuses": {
+      "pending": "pending",
+      "sent": "sent"
+    }
+  },
+  "exportScopes": {
+    "incoming": "incoming",
+    "archive": "archive",
+    "blocked": "blocked",
+    "review": "review",
+    "selected": "selected",
+    "discarded": "discarded"
+  },
+  "publicStreams": {
+    "briefs": "briefs",
+    "longform": "longform"
+  },
+  "configKeys": {
+    "systemTimezone": "system.timezone",
+    "dedupThreshold": "automation.dedup.threshold"
+  }
+}

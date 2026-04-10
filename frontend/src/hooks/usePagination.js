@@ -1,10 +1,24 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
-/**
- * 通用分页Hook
- * @param {Function} fetchFn - 数据获取函数，接收(page, limit, ...params)
- * @returns {Object} - { data, loading, pagination, handlePageChange, refresh }
- */
+export const createPaginationConfig = (pagination, onPageChange, defaultPageSize = 10) => ({
+    current: pagination.current,
+    pageSize: pagination.pageSize || defaultPageSize,
+    total: pagination.total,
+    showSizeChanger: true,
+    showTotal: (total) => `共 ${total} 条`,
+    pageSizeOptions: ['10', '20', '50', '100'],
+    onChange: (page, pageSize) => {
+        if (onPageChange) {
+            onPageChange(page, pageSize);
+        }
+    },
+    onShowSizeChange: (_, size) => {
+        if (onPageChange) {
+            onPageChange(1, size);
+        }
+    }
+});
+
 export const usePagination = (fetchFn) => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -14,13 +28,7 @@ export const usePagination = (fetchFn) => {
         total: 0
     });
 
-    /**
-     * 加载数据
-     * @param {number} page - 页码
-     * @param {number} pageSize - 每页数量
-     * @param {...any} params - 额外参数
-     */
-    const loadData = async (page, pageSize, ...params) => {
+    const loadData = useCallback(async (page, pageSize, ...params) => {
         setLoading(true);
         try {
             const result = await fetchFn(page, pageSize, ...params);
@@ -36,21 +44,15 @@ export const usePagination = (fetchFn) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [fetchFn]);
 
-    /**
-     * 处理分页变化
-     */
-    const handlePageChange = (page, pageSize) => {
+    const handlePageChange = useCallback((page, pageSize) => {
         loadData(page, pageSize);
-    };
+    }, [loadData]);
 
-    /**
-     * 刷新当前页
-     */
-    const refresh = () => {
+    const refresh = useCallback(() => {
         loadData(pagination.current, pagination.pageSize);
-    };
+    }, [loadData, pagination]);
 
     return {
         data,
@@ -58,6 +60,9 @@ export const usePagination = (fetchFn) => {
         pagination,
         handlePageChange,
         refresh,
-        loadData
+        loadData,
+        getPaginationConfig: (defaultPageSize = pagination.pageSize || 10, onPageChange = handlePageChange) => (
+            createPaginationConfig(pagination, onPageChange, defaultPageSize)
+        )
     };
 };

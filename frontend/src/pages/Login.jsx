@@ -1,25 +1,12 @@
-import React, { useState } from 'react';
-import { Form, Input, Button, Card, message } from 'antd';
+import React from 'react';
+import { Form, Input, Button, Card } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { login } from '../api';
+import { useLoginForm } from '../hooks/useLoginForm';
 
 const Login = () => {
-    const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
-
-    const onFinish = async (values) => {
-        setLoading(true);
-        try {
-            await login(values.username, values.password);
-            message.success('登录成功');
-            navigate('/admin');  // 跳转到后台管理
-        } catch (error) {
-            message.error('登录失败: 密码错误或服务器异常');
-        } finally {
-            setLoading(false);
-        }
-    };
+    const { loading, submit } = useLoginForm(navigate);
 
     return (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f2f5' }}>
@@ -27,7 +14,7 @@ const Login = () => {
                 <Form
                     name="login"
                     initialValues={{ remember: true }}
-                    onFinish={onFinish}
+                    onFinish={submit}
                 >
                     <Form.Item
                         name="username"
@@ -35,7 +22,7 @@ const Login = () => {
                     >
                         <Input
                             prefix={<UserOutlined />}
-                            placeholder="Username (admin)"
+                            placeholder="管理员用户名"
                         />
                     </Form.Item>
 
@@ -45,7 +32,7 @@ const Login = () => {
                     >
                         <Input.Password
                             prefix={<LockOutlined />}
-                            placeholder="Password (admin123)"
+                            placeholder="管理员密码"
                         />
                     </Form.Item>
 

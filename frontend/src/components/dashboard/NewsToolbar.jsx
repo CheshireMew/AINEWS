@@ -16,7 +16,7 @@ const NewsToolbar = ({
     spiders,            // 爬虫列表 (用于来源筛选) - 数组中元素为 {name: 'techflow', type: 'news'}
     selectedSource,     // 当前选中的来源
     onSourceChange,     // 来源变更回调 (value) => {}
-    contentType,        // 当前内容类型 ('news' | 'article') - 用于过滤对应类型的爬虫
+    contentKind,        // 当前内容类型 ('news' | 'article') - 用于过滤对应类型的爬虫
 
     onExport,           // 导出回调 () => {}
 
@@ -39,9 +39,8 @@ const NewsToolbar = ({
         }
     };
 
-    // 根据contentType过滤爬虫列表
-    const filteredSpiders = spiders && contentType
-        ? spiders.filter(s => s.type === contentType)
+    const filteredSpiders = spiders && contentKind
+        ? spiders.filter(s => s.type === contentKind)
         : spiders;
 
     return (
@@ -69,8 +68,8 @@ const NewsToolbar = ({
                         >
                             <Option value="">全部来源</Option>
                             {filteredSpiders.map(s => (
-                                <Option key={s.name} value={s.name}>
-                                    {s.display_name || s.name}
+                                <Option key={s.name} value={s.source_site || s.display_name || s.name}>
+                                    {s.display_name || s.source_site || s.name}
                                 </Option>
                             ))}
                         </Select>

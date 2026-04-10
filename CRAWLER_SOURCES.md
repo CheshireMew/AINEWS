@@ -4,49 +4,49 @@
 
 ### 1. BlockBeats (律动)
 - **URL**: https://www.theblockbeats.info/newsflash
-- **文件**: `crawler/scrapers/blockbeats.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/blockbeats.py`
 - **重要标识**: `first` 徽章/样式检查
 - **内容选择器**: `.flash-content`
 - **特点**: 使用样式检查判断重要性
 
 ### 2. ChainCatcher (链捕手)
 - **URL**: https://www.chaincatcher.com/news
-- **文件**: `crawler/scrapers/chaincatcher.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/chaincatcher.py`
 - **重要标识**: `selectedClass` 类（红色高亮）
 - **内容选择器**: `.rich_text_content`
 - **特点**: 支持"只看精选"筛选
 
 ### 3. Foresight News (预见未来)
 - **URL**: https://foresightnews.pro/news
-- **文件**: `crawler/scrapers/foresight.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/foresight.py`
 - **重要标识**: `redcolor` 类/样式检查
 - **内容选择器**: `.detail-body`
 - **特点**: 支持"只看重要"筛选
 
 ### 4. MarsBit (火星财经)
 - **URL**: https://news.marsbit.co/flash
-- **文件**: `crawler/scrapers/marsbit.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/marsbit.py`
 - **重要标识**: `.item-icons.import` 类
 - **内容选择器**: `.content-words`
 - **特点**: 使用复选框筛选重要快讯
 
 ### 5. Odaily (星球日报)
 - **URL**: https://www.odaily.news/zh-CN/newsflash
-- **文件**: `crawler/scrapers/odaily.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/odaily.py`
 - **重要标识**: 火焰图标 (`hot_icon`)
 - **内容选择器**: `#newsflash-content`
 - **特点**: 使用 `#import_checkbox` 筛选
 
 ### 6. PANews (PANews)
 - **URL**: https://www.panewslab.com/zh/newsflash
-- **文件**: `crawler/scrapers/panews.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/panews.py`
 - **重要标识**: "首发"标记
 - **内容选择器**: `article.prose`
 - **特点**: 支持"只看重要/首发"筛选
 
 ### 7. TechFlow (深潮)
 - **URL**: https://www.techflowpost.com/newsletter/index.html
-- **文件**: `crawler/scrapers/techflow.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/techflow.py`
 - **重要标识**: `c002CCC` 类/`first_pub` 图标
 - **内容选择器`: `.art_detail_content`
 - **特点**: 蓝色文字标识重要性
@@ -57,7 +57,7 @@
 
 ### 8. MarsBit Article (火星财经 - 深度)
 - **URL**: https://news.marsbit.cc/feature
-- **文件**: `crawler/scrapers/marsbit_article.py`
+- **文件**: `backend/app/infrastructure/scraper_impl/marsbit_article.py`
 - **数据类型**: `article`
 - **内容选择器**: `.detail-content`
 - **特点**: 抓取时事/专栏类深度文章

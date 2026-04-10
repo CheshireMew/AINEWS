@@ -2,25 +2,41 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { Row } from 'antd';
 import ScraperCard from './ScraperCard';
+import RssSourceManager from './RssSourceManager';
 
 /**
  * 爬虫控制Tab组件
  * 用于管理所有爬虫的运行状态和配置
  * Updated: Force Refresh
  */
-const SpiderControlTab = ({ spiders, spiderStatus, onRun, onCancel, onConfigChange, contentType }) => {
-    // 根据 contentType 过滤爬虫
+const SpiderControlTab = ({
+    spiders,
+    spiderStatus,
+    rssSources,
+    onRun,
+    onCancel,
+    onConfigChange,
+    onCreateRssSource,
+    onUpdateRssSource,
+    onDeleteRssSource,
+    contentKind,
+}) => {
     const filteredSpiders = spiders.filter(spider => {
-        // 如果 spider 是对象（新格式），检查 type
         if (typeof spider === 'object' && spider.type) {
-            return spider.type === contentType;
+            return spider.type === contentKind;
         }
-        // 兼容旧格式（字符串），默认为 news
-        return contentType === 'news';
+        return contentKind === 'news';
     });
 
     return (
         <div style={{ padding: '0 10px' }}>
+            <RssSourceManager
+                sources={rssSources}
+                contentKind={contentKind}
+                onCreate={onCreateRssSource}
+                onUpdate={onUpdateRssSource}
+                onDelete={onDeleteRssSource}
+            />
             <Row gutter={[16, 16]}>
                 {filteredSpiders.map(spider => {
                     const spiderName = typeof spider === 'object' ? spider.name : spider;
@@ -28,6 +44,8 @@ const SpiderControlTab = ({ spiders, spiderStatus, onRun, onCancel, onConfigChan
                         <ScraperCard
                             key={spiderName}
                             name={spiderName}
+                            displayName={spider.display_name || spider.source_site || spiderName}
+                            contentKind={spider.type || contentKind}
                             status={spiderStatus[spiderName] || {}}
                             onRun={onRun}
                             onCancel={onCancel}
@@ -43,9 +61,14 @@ const SpiderControlTab = ({ spiders, spiderStatus, onRun, onCancel, onConfigChan
 SpiderControlTab.propTypes = {
     spiders: PropTypes.arrayOf(PropTypes.object).isRequired,
     spiderStatus: PropTypes.object.isRequired,
-    onRunSpider: PropTypes.func.isRequired,
-    onCancelSpider: PropTypes.func.isRequired,
-    onUpdateConfig: PropTypes.func.isRequired
+    rssSources: PropTypes.arrayOf(PropTypes.object).isRequired,
+    onRun: PropTypes.func.isRequired,
+    onCancel: PropTypes.func.isRequired,
+    onConfigChange: PropTypes.func.isRequired,
+    onCreateRssSource: PropTypes.func.isRequired,
+    onUpdateRssSource: PropTypes.func.isRequired,
+    onDeleteRssSource: PropTypes.func.isRequired,
+    contentKind: PropTypes.string.isRequired,
 };
 
 export default SpiderControlTab;

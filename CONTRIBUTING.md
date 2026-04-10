@@ -16,7 +16,7 @@
 
 如果你发现了Bug，请遵循以下步骤：
 
-1. **检查现有Issues**: 在提交新Issue前，请先搜索[现有Issues](https://github.com/your-username/AINEWS/issues)，避免重复
+1. **检查现有 Issues**: 在提交新 Issue 前，请先搜索[现有 Issues](https://github.com/your-username/AINEWS/issues)，避免重复
 2. **使用Issue模板**: 创建新Issue时，请提供以下信息：
    - Bug的详细描述
    - 复现步骤
@@ -31,8 +31,8 @@
 简洁描述Bug是什么
 
 **复现步骤**
-1. 启动爬虫 `python crawler/main.py`
-2. 访问某个特定URL
+1. 启动后端 `python backend/main.py`
+2. 在前端或接口中触发对应操作
 3. 观察到错误...
 
 **预期行为**
@@ -91,11 +91,8 @@ cd ../frontend && npm install
 
 3. **测试你的修改**
    ```bash
-   # 测试爬虫
-   cd crawler && python main.py --dry-run
-   
    # 测试后端
-   cd backend && python main.py
+   python backend/main.py
    
    # 测试前端
    cd frontend && npm run dev
@@ -198,7 +195,7 @@ export default NewsCard;
 
 ### 数据库操作规范
 
-- 所有数据库操作应在 `database/` 目录中实现
+- 所有数据库操作应在 `backend/app/infrastructure/sqlite/` 和 `backend/app/infrastructure/repository_impl/` 中实现
 - 使用参数化查询，避免SQL注入
 - 为事务性操作添加错误处理
 - 记录重要操作的日志
@@ -209,32 +206,28 @@ export default NewsCard;
 
 1. **继承BaseScraper类**
    ```python
-   # crawler/scrapers/your_site.py
+   # backend/app/infrastructure/scraper_impl/your_site.py
    from .base import BaseScraper
    
    class YourSiteScraper(BaseScraper):
        def __init__(self):
            super().__init__(
-               name="yoursite",
-               base_url="https://example.com",
-               list_url="https://example.com/news"
+               site_name="yoursite",
+               base_url="https://example.com"
            )
        
-       async def parse_list(self, page):
-           # 实现列表页解析
-           pass
-       
-       async def fetch_full_content(self, url):
-           # 实现详情页抓取
+       async def scrape_important_news(self):
+           # 实现抓取逻辑
            pass
    ```
 
 2. **注册爬虫**
-   在 `crawler/main.py` 中添加你的爬虫
+   在 `backend/app/core/scrapers_registry.py` 中注册你的爬虫
 
 3. **测试爬虫**
    ```bash
-   python crawler/main.py --scraper=yoursite --dry-run
+   python backend/main.py
+   # 然后通过后台“爬虫控制”触发你的新爬虫
    ```
 
 4. **更新文档**

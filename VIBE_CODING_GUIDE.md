@@ -225,7 +225,7 @@ git commit -m "feat: add user list with pagination and search"
 
 ---
 
-## Tab 2: 去重数据 (DeduplicatedTab)
+## Tab 2: 归档池 (ArchiveTab)
 ...
 ```
 
